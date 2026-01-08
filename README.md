@@ -1,7 +1,7 @@
 # Narrative Consistency Checker 🔍
 
 > **Track A Solution** for Kharagpur Data Science Hackathon 2026
-> 
+>
 > A sophisticated multi-agent system for evaluating backstory consistency with long-form narratives using Pathway framework and multiple LLM reasoning strategies.
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -73,9 +73,42 @@ Output: Decision (0/1) + Confidence + Reasoning
 ### Prerequisites
 
 - Python 3.8 or higher
+- **Windows users**: WSL (Windows Subsystem for Linux) required for Pathway
+- **Linux/Mac users**: Native support
 - (Optional) CUDA-capable GPU for local embeddings
 
 ### Installation
+
+#### **For Windows Users** (Recommended: WSL)
+
+Pathway framework requires Linux. Use WSL (built into Windows 10/11):
+
+```powershell
+# 1. Check if WSL is installed
+wsl --version
+
+# 2. If not installed, install WSL
+wsl --install
+
+# 3. Start WSL Ubuntu
+wsl
+
+# Now you're in Linux! Navigate to your project:
+cd /mnt/d/Learning/Kharapur_Hackathon/hackathon
+
+# 4. Install Python and dependencies
+sudo apt update && sudo apt install python3 python3-pip python3-venv -y
+
+# 5. Create virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 6. Install requirements
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+#### **For Linux/Mac Users**
 
 ```bash
 # Clone the repository
@@ -83,9 +116,8 @@ git clone <your-repo>
 cd hackathon
 
 # Create virtual environment
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/Mac
+python3 -m venv venv
+source venv/bin/activate  # Linux/Mac
 
 # Install dependencies
 pip install -r requirements.txt
@@ -94,38 +126,47 @@ pip install -r requirements.txt
 ### Setup API Keys
 
 1. **Get FREE Groq API Key**: https://console.groq.com
-2. Copy `.env.example` to `.env`:
+2. Create `.env` file from template:
+
    ```bash
-   copy .env.example .env  # Windows
-   # cp .env.example .env  # Linux/Mac
+   # WSL/Linux/Mac
+   cp .env.example .env
+   nano .env  # or use any text editor
+
+   # Windows (if editing from Windows)
+   # Open .env in VS Code or Notepad
    ```
-3. Edit `.env` and add your API key:
+
+3. Add your API key:
    ```
-   GROQ_API_KEY=your_groq_api_key_here
+   GROQ_API_KEY=your_actual_groq_key_here
    ```
 
 ### Run the System
 
-#### Process Entire Dataset
+#### Process Training Data (140 examples)
+
 ```bash
-python main.py --dataset data/ --output results.csv
+python main.py --dataset train.csv --output train_results.csv
 ```
 
-#### Process Single Example
+#### Generate Test Predictions (59 examples for submission)
+
 ```bash
-python main.py --narrative story.txt --backstory backstory.txt --output result.csv
+python main.py --dataset test.csv --output submission.csv
 ```
 
 #### Use Different LLM Provider
+
 ```bash
 # Use Ollama (local, requires Ollama installed)
-python main.py --provider ollama --dataset data/
+python main.py --provider ollama --dataset train.csv
 
 # Use Claude (requires API key)
-python main.py --provider anthropic --dataset data/
+python main.py --provider anthropic --dataset test.csv
 
 # Use GPT-4 (requires API key)
-python main.py --provider openai --dataset data/
+python main.py --provider openai --dataset test.csv
 ```
 
 ## 📊 Configuration
@@ -134,13 +175,20 @@ Edit `config.yaml` to customize:
 
 ```yaml
 # Primary LLM provider
-llm_provider: "groq"  # groq, ollama, anthropic, openai, google
+llm_provider: "groq" # groq, ollama, anthropic, openai, google
+
+# Groq Configuration (FREE)
+providers:
+  groq:
+    model: "llama-3.3-70b-versatile" # Latest model
+    temperature: 0.1
+    max_tokens: 4096
 
 # Self-consistency
 self_consistency:
   enabled: true
-  num_chains: 10  # Number of reasoning chains
-  voting_strategy: "weighted"  # or "majority"
+  num_chains: 10 # Number of reasoning chains
+  voting_strategy: "weighted" # or "majority"
 
 # Multi-agent system
 multi_agent:
@@ -152,7 +200,7 @@ ensemble:
   enabled: true
   models:
     - provider: "groq"
-      model: "llama-3.1-70b-versatile"
+      model: "llama-3.3-70b-versatile"
       weight: 1.0
     - provider: "ollama"
       model: "llama3.1:8b"
@@ -161,73 +209,147 @@ ensemble:
 
 ## 💰 Cost Analysis
 
-| Configuration | Accuracy | Cost | Speed |
-|--------------|----------|------|-------|
-| **Groq Llama 3.1 70B** | ~82% | **$0** (FREE) | ⚡ Fast |
-| + Self-consistency (10x) | ~87% | **$0** | Medium |
-| + Multi-agent | ~90% | **$0** | Slower |
-| **+ Claude 3.5 Sonnet** | ~93% | ~$20-50 | Fast |
-| **+ Ensemble (3 models)** | ~95% | ~$30-70 | Slower |
+| Configuration             | Accuracy | Cost          | Speed   |
+| ------------------------- | -------- | ------------- | ------- |
+| **Groq Llama 3.3 70B**    | ~82%     | **$0** (FREE) | ⚡ Fast |
+| + Self-consistency (10x)  | ~87%     | **$0**        | Medium  |
+| + Multi-agent             | ~90%     | **$0**        | Slower  |
+| **+ Claude 3.5 Sonnet**   | ~93%     | ~$20-50       | Fast    |
+| **+ Ensemble (3 models)** | ~95%     | ~$30-70       | Slower  |
+
+_All processing is FREE when using Groq - no credit card required!_
 
 ## 🔧 Advanced Usage
 
-### Disable Specific Features
+### Disable Specific Features (Faster Processing)
 
 ```bash
-# Disable self-consistency (faster)
-python main.py --no-self-consistency --dataset data/
+# Disable self-consistency (faster, lower accuracy)
+python main.py --no-self-consistency --dataset train.csv
 
-# Disable multi-agent (faster)
-python main.py --no-multi-agent --dataset data/
+# Disable multi-agent (faster, lower accuracy)
+python main.py --no-multi-agent --dataset train.csv
 
-# Disable reranker
-python main.py --no-reranker --dataset data/
+# Disable reranker (faster)
+python main.py --no-reranker --dataset train.csv
+
+# Speed mode: disable all advanced features
+python main.py --no-self-consistency --no-multi-agent --no-reranker --dataset train.csv
 ```
 
 ### Custom Configuration
 
 ```bash
-python main.py --config custom_config.yaml --dataset data/
+python main.py --config custom_config.yaml --dataset train.csv
 ```
 
 ### Debug Mode
 
 ```bash
-python main.py --log-level DEBUG --dataset data/
+python main.py --log-level DEBUG --dataset train.csv
+```
+
+### Process Specific Provider
+
+```bash
+# Override config file provider
+python main.py --provider groq --dataset train.csv
+python main.py --provider anthropic --dataset test.csv
 ```
 
 ## 📁 Project Structure
 
 ```
-hackathon/
-├── main.py                     # CLI entry point
-├── config.yaml                 # Configuration file
-├── requirements.txt            # Python dependencies
-├── .env.example               # Environment variables template
-├── src/
-│   ├── __init__.py
-│   ├── config.py              # Configuration loader
-│   ├── llm_providers.py       # LLM provider abstractions
-│   ├── pathway_ingestion.py  # Pathway vector store
-│   ├── self_consistency.py   # Self-consistency engine
-│   ├── multi_agent.py         # Multi-agent system
-│   ├── ensemble.py            # Ensemble voting
-│   └── pipeline.py            # Main pipeline
-├── logs/                      # Log files (auto-created)
-└── README.md
+hackathon/                          # Root project directory
+├── 📄 main.py                      # CLI entry point - run this file
+├── 📄 config.yaml                  # Configuration (LLM models, settings)
+├── 📄 requirements.txt             # Python dependencies
+├── 📄 .env.example                 # Template for API keys
+├── 📄 .env                         # Your actual API keys (gitignored)
+├── 📄 .gitignore                   # Git ignore rules
+├── 📄 README.md                    # This file
+├── 📄 SETUP.md                     # Detailed setup instructions
+├── 📄 USAGE.md                     # Usage examples
+├── 📄 DATASET_GUIDE.md             # Dataset structure explanation
+│
+├── 📊 train.csv                    # Training data (140 examples)
+├── 📊 test.csv                     # Test data (59 examples to predict)
+│
+├── 📁 data/                        # Narrative text files (novels)
+│   ├── In search of the castaways.txt    # Full novel (~100k words)
+│   └── The Count of Monte Cristo.txt     # Full novel (~100k words)
+│
+├── 📁 src/                         # Source code modules
+│   ├── 📄 __init__.py              # Package initializer
+│   ├── 📄 config.py                # Configuration loader
+│   ├── 📄 llm_providers.py         # LLM abstraction (Groq, Ollama, etc.)
+│   ├── 📄 pathway_ingestion.py    # Pathway vector store & chunking
+│   ├── 📄 self_consistency.py     # Self-consistency engine (10 chains)
+│   ├── 📄 multi_agent.py           # Multi-agent system (4 agents)
+│   ├── 📄 ensemble.py              # Ensemble voting logic
+│   └── 📄 pipeline.py              # Main processing pipeline
+│
+├── 📁 logs/                        # Log files (auto-created)
+│   └── narrator_*.log              # Timestamped log files
+│
+└── 📁 venv/                        # Virtual environment (gitignored)
+    └── ...                         # Python packages
 ```
+
+### 📊 Dataset Structure
+
+**train.csv** (140 labeled examples):
+
+```csv
+id,book_name,char,caption,content,label
+46,In Search of the Castaways,Thalcave,,"Backstory text...",consistent
+137,The Count of Monte Cristo,Faria,...,"Backstory text...",contradict
+```
+
+**test.csv** (59 unlabeled examples for submission):
+
+```csv
+id,book_name,char,caption,content
+95,The Count of Monte Cristo,Noirtier,,"Backstory text..."
+136,The Count of Monte Cristo,Faria,,"Backstory text..."
+```
+
+**Output Format** (what you submit):
+
+```csv
+Story ID,Prediction,Rationale
+95,0,"Backstory contradicts established timeline in Chapter 15..."
+136,1,"Backstory aligns with character development arc..."
+```
+
+Where:
+
+- `Prediction`: **1** = Consistent, **0** = Inconsistent
+- `Rationale`: Brief explanation (1-2 sentences)
 
 ## 🎓 How It Works
 
-### 1. **Pathway Integration** (Required for Track A)
+### 1. **Data Loading** (CSV-based)
+
+The system reads `train.csv` or `test.csv` which contains:
+
+- Character backstories (in the `content` column)
+- Book names (maps to novel files in `data/`)
+- Example IDs
+
+For each row, it loads the corresponding full novel from `data/` folder.
+
+### 2. **Pathway Integration** (Required for Track A)
 
 - Uses Pathway's vector store for semantic search
 - Semantic chunking preserves narrative coherence
 - Hybrid search (semantic + keyword) for comprehensive retrieval
+- BGE-large embeddings for high-quality representations
 
-### 2. **Self-Consistency Reasoning**
+### 3. **Self-Consistency Reasoning**
 
 Generates 10 independent reasoning chains with different strategies:
+
 - **Direct Analysis**: Straightforward consistency check
 - **Timeline Reconstruction**: Temporal ordering validation
 - **Character Psychology**: Personality and motivation alignment
@@ -238,74 +360,139 @@ Generates 10 independent reasoning chains with different strategies:
 - **Step-by-Step Logic**: Formal logical analysis
 - **Counterfactual Reasoning**: "What if" scenarios
 
-### 3. **Multi-Agent Adversarial System**
+Each chain votes independently, then results are aggregated.
+
+### 4. **Multi-Agent Adversarial System**
 
 Four specialized agents collaborate:
+
 - **Prosecutor**: Builds case for INCONSISTENCY
 - **Defender**: Builds case for CONSISTENCY
 - **Investigator**: Neutral fact-gathering
 - **Judge**: Final decision based on all arguments
 
-### 4. **Ensemble Voting**
+Agents deliberate over multiple rounds, refining their arguments.
+
+### 5. **Ensemble Voting**
 
 Aggregates predictions using:
+
 - **Majority voting**: Equal weight to each prediction
 - **Weighted voting**: Based on confidence scores
 - **Soft voting**: Continuous probability scores
 
+Final decision combines all reasoning methods for maximum accuracy.
+
 ## 🔬 Why This Approach Wins
 
 ### ✅ **Novel NLP Approach**
+
 - Goes beyond basic RAG with adversarial reasoning
 - Self-consistency with 10 diverse reasoning strategies
 - Causal hypothesis generation and testing
 
 ### ✅ **Robust Long-Context Handling**
+
 - Semantic chunking preserves narrative structure
 - Multi-query retrieval captures different aspects
 - Cross-encoder reranking improves precision
 
 ### ✅ **Evidence-Grounded**
+
 - Every decision backed by specific text passages
 - Multiple agents verify evidence independently
 - Transparent reasoning chain
 
 ### ✅ **Pathway Integration**
+
 - Meaningfully uses Pathway for vector store
 - Efficient ingestion and retrieval
 - Scalable to large narratives
 
 ### ✅ **Reproducible & Configurable**
+
 - Works with FREE models (Groq, Ollama)
 - Easy to upgrade to paid models
 - Clear documentation for judges to run
 
 ## 🐛 Troubleshooting
 
+### Windows: "Pathway not found" or Import Errors
+
+**Solution**: Pathway requires Linux. Use WSL:
+
+```powershell
+# Install WSL if not already installed
+wsl --install
+
+# Start WSL
+wsl
+
+# Navigate to project (Windows D: drive maps to /mnt/d/)
+cd /mnt/d/Learning/Kharapur_Hackathon/hackathon
+
+# Run from WSL
+python main.py --dataset train.csv --output results.csv
+```
+
 ### "Groq API key not found"
+
 ```bash
-# Make sure .env file exists and contains:
-GROQ_API_KEY=your_actual_key_here
+# Make sure .env file exists with your actual key:
+GROQ_API_KEY=gsk_your_actual_key_here
+
+# Check if file exists
+cat .env  # Linux/WSL
+type .env  # Windows CMD
+```
+
+### "Model llama-3.1-70b-versatile decommissioned"
+
+Update `config.yaml`:
+
+```yaml
+providers:
+  groq:
+    model: "llama-3.3-70b-versatile" # Use newer model
 ```
 
 ### "Ollama connection failed"
+
 ```bash
-# Install and start Ollama first:
-# Download from: https://ollama.ai
-ollama serve
-ollama pull llama3.1:70b
+# Install Ollama first: https://ollama.ai
+ollama serve  # Start server
+ollama pull llama3.1:70b  # Download model
 ```
 
 ### "Out of memory" errors
-```bash
-# Reduce chunk size in config.yaml:
+
+```yaml
+# Edit config.yaml - reduce chunk size:
 pathway:
   chunking:
-    chunk_size: 500  # Smaller chunks
-    
-# Or reduce number of reasoning chains:
+    chunk_size: 500 # Smaller chunks
+
+# Or reduce reasoning chains:
 self_consistency:
-  num_chains: 5  # Fewer chains
+  num_chains: 5 # Fewer chains
+```
+
+### WSL: "Permission denied" errors
+
+```bash
+# Fix permissions
+chmod +x main.py
+chmod -R 755 src/
+```
+
+### Dataset not found
+
+```bash
+# Make sure files are in correct location:
+ls -la  # Should show train.csv, test.csv
+ls data/  # Should show two .txt files
+
+# If missing, download from hackathon Google Drive
 ```
 
 ## 📝 Output Format
@@ -324,12 +511,14 @@ Story ID,Prediction,Rationale
 ## 🎯 Performance Tips
 
 ### For Maximum Accuracy:
+
 1. Enable all features (self-consistency + multi-agent)
 2. Use Groq Llama 3.1 70B (best free model)
 3. If budget allows, add Claude 3.5 to ensemble
 4. Increase `num_chains` to 15-20
 
 ### For Maximum Speed:
+
 1. Disable multi-agent: `--no-multi-agent`
 2. Reduce chains: set `num_chains: 3`
 3. Use smaller model: `llama3.1:8b` with Ollama

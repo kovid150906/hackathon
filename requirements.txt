@@ -1,5 +1,5 @@
 # Core Framework
-pathway>=0.8.0
+pathway[xpack-llm]>=0.8.0
 
 # LLM Providers
 groq>=0.4.0
@@ -30,5 +30,13 @@ tqdm>=4.66.0
 loguru>=0.7.0
 tenacity>=8.2.3
 
-# PDF Processing (for reference materials)
+# Document Processing
 PyPDF2>=3.0.0
+pdf2image>=1.16.0
+unstructured>=0.10.0
+pillow>=10.0.0
+
+# Additional Dependencies
+requests>=2.31.0
+urllib3>=2.0.0
+charset-normalizer>=3.0.0
