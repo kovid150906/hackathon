@@ -7,56 +7,56 @@ llm_provider: "groq"
 # Provider Configurations
 providers:
   groq:
-    model: "llama-3.1-70b-versatile"
+    model: "llama-3.3-70b-versatile"
     temperature: 0.1
     max_tokens: 4096
-    cost_per_million_tokens: 0  # FREE
-    
+    cost_per_million_tokens: 0 # FREE
+
   ollama:
     base_url: "http://localhost:11434"
     model: "llama3.1:70b"
     temperature: 0.1
     num_ctx: 8192
-    cost_per_million_tokens: 0  # FREE (local)
-    
+    cost_per_million_tokens: 0 # FREE (local)
+
   anthropic:
     model: "claude-3-5-sonnet-20241022"
     temperature: 0.1
     max_tokens: 8192
-    cost_per_million_tokens: 3000  # $3 per million input tokens
-    
+    cost_per_million_tokens: 3000 # $3 per million input tokens
+
   openai:
     model: "gpt-4-turbo-preview"
     temperature: 0.1
     max_tokens: 4096
-    cost_per_million_tokens: 10000  # $10 per million input tokens
-    
+    cost_per_million_tokens: 10000 # $10 per million input tokens
+
   google:
     model: "gemini-1.5-pro"
     temperature: 0.1
     max_output_tokens: 8192
-    cost_per_million_tokens: 1250  # $1.25 per million input tokens
+    cost_per_million_tokens: 1250 # $1.25 per million input tokens
 
 # Embeddings Configuration
 embeddings:
-  model: "BAAI/bge-large-en-v1.5"  # or "sentence-transformers/all-MiniLM-L6-v2"
-  device: "cpu"  # or "cuda" if GPU available
+  model: "BAAI/bge-large-en-v1.5" # or "sentence-transformers/all-MiniLM-L6-v2"
+  device: "cpu" # or "cuda" if GPU available
   batch_size: 32
 
 # Reranker Configuration
 reranker:
   enabled: true
   model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
-  top_k: 50  # Get top 50 before reranking
-  final_k: 20  # Keep top 20 after reranking
+  top_k: 50 # Get top 50 before reranking
+  final_k: 20 # Keep top 20 after reranking
 
 # Pathway Configuration
 pathway:
   vector_store:
-    dimension: 1024  # BGE-large dimension
+    dimension: 1024 # BGE-large dimension
     collection_name: "narrative_chunks"
   chunking:
-    strategy: "semantic"  # semantic, fixed, or hybrid
+    strategy: "semantic" # semantic, fixed, or hybrid
     chunk_size: 1000
     chunk_overlap: 200
     min_chunk_size: 500
@@ -64,8 +64,8 @@ pathway:
 # Self-Consistency Configuration
 self_consistency:
   enabled: true
-  num_chains: 10  # Number of independent reasoning chains
-  voting_strategy: "weighted"  # majority or weighted
+  num_chains: 10 # Number of independent reasoning chains
+  voting_strategy: "weighted" # majority or weighted
   confidence_threshold: 0.6
 
 # Ensemble Configuration
@@ -73,12 +73,12 @@ ensemble:
   enabled: true
   models:
     - provider: "groq"
-      model: "llama-3.1-70b-versatile"
+      model: "llama-3.3-70b-versatile"
       weight: 1.0
     - provider: "ollama"
       model: "llama3.1:8b"
       weight: 0.8
-  voting_strategy: "weighted"  # majority, weighted, or soft
+  voting_strategy: "weighted" # majority, weighted, or soft
   min_agreement: 0.6
 
 # Multi-Agent Configuration
@@ -103,7 +103,7 @@ multi_agent:
 evidence:
   max_passages: 30
   min_relevance_score: 0.5
-  context_window: 500  # Characters before/after match
+  context_window: 500 # Characters before/after match
 
 # Output Configuration
 output:

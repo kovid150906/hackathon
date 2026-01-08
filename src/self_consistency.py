@@ -44,11 +44,13 @@ class SelfConsistencyEngine:
             logger.info(f"Generating reasoning chain {i+1}/{self.num_chains}")
             
             try:
-                response = self.llm.generate(prompt, temperature=0.2)
+                # Extract content string from prompt dict
+                prompt_text = prompt['content'] if isinstance(prompt, dict) else prompt
+                response = self.llm.generate(prompt_text, temperature=0.2)
                 parsed = self._parse_response(response)
                 chains.append({
                     'chain_id': i,
-                    'prompt_type': prompt['type'],
+                    'prompt_type': prompt.get('type', 'unknown') if isinstance(prompt, dict) else 'unknown',
                     'decision': parsed['decision'],
                     'confidence': parsed['confidence'],
                     'reasoning': parsed['reasoning'],
@@ -58,7 +60,7 @@ class SelfConsistencyEngine:
                 logger.error(f"Error in chain {i}: {e}")
                 chains.append({
                     'chain_id': i,
-                    'prompt_type': prompt['type'],
+                    'prompt_type': prompt.get('type', 'unknown') if isinstance(prompt, dict) else 'unknown',
                     'decision': None,
                     'confidence': 0.0,
                     'reasoning': f"Error: {str(e)}",

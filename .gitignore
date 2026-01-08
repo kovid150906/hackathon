@@ -1,0 +1,85 @@
+# Environment Variables (CRITICAL: Contains API keys!)
+.env
+.env.example
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+src/__pycache__/
+
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+
+# Logs
+logs/
+*.log
+
+# Large Data Files (novels are 100k+ words)
+data/*.txt
+data/In search of the castaways.txt
+data/The Count of Monte Cristo.txt
+
+# Output Files (generated results)
+results.csv
+results_*.csv
+*_results.csv
+submission.csv
+submission_*.csv
+train_predictions.csv
+test_predictions.csv
+
+# Temporary Configuration Files
+temp_config*.yaml
+*_config_*.yaml
+
+# Model Cache & Downloads
+.cache/
+models/
+*.safetensors
+*.bin
+*.onnx
+
+# Sentence Transformers Cache
+sentence_transformers_cache/
+transformers_cache/
+
+# Pathway Cache
+pathway_cache/
+.pathway/
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.code-workspace
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter Notebooks (if you create any)
+.ipynb_checkpoints/
+*.ipynb
+
+# Python Build
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Compressed Archives
+*.zip
+*.tar.gz
+*.rar
+
+# Backup Files
+*.bak
+*.backup

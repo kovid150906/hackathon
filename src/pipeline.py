@@ -366,14 +366,56 @@ REASONING: [Brief explanation]"""
         return df
     
     def _load_dataset(self, dataset_path: str) -> List[Dict[str, Any]]:
-        """Load dataset from file or directory."""
-        # This is a placeholder - implement based on actual dataset format
+        """Load dataset from CSV file with book narratives."""
         logger.info(f"Loading dataset from {dataset_path}")
         
         path = Path(dataset_path)
         
-        if path.is_file():
-            # Assume JSON or JSONL format
+        # Handle CSV file (train.csv or test.csv)
+        if path.is_file() and path.suffix == '.csv':
+            logger.info(f"Loading CSV dataset: {path}")
+            df = pd.read_csv(path)
+            
+            # Load narrative texts
+            narratives = {}
+            data_dir = path.parent / 'data'
+            
+            # Map book names to file names
+            book_files = {
+                'In Search of the Castaways': 'In search of the castaways.txt',
+                'The Count of Monte Cristo': 'The Count of Monte Cristo.txt'
+            }
+            
+            for book_name, filename in book_files.items():
+                book_path = data_dir / filename
+                if book_path.exists():
+                    logger.info(f"Loading narrative: {book_name}")
+                    with open(book_path, 'r', encoding='utf-8') as f:
+                        narratives[book_name] = f.read()
+                else:
+                    logger.warning(f"Narrative file not found: {book_path}")
+            
+            # Create examples
+            examples = []
+            for _, row in df.iterrows():
+                book_name = row['book_name']
+                if book_name in narratives:
+                    examples.append({
+                        'id': str(row['id']),
+                        'narrative': narratives[book_name],
+                        'backstory': row['content'],
+                        'book_name': book_name,
+                        'character': row.get('char', ''),
+                        'true_label': row.get('label', None)  # None for test.csv
+                    })
+                else:
+                    logger.error(f"No narrative found for book: {book_name}")
+            
+            logger.info(f"Loaded {len(examples)} examples from CSV")
+            return examples
+        
+        # Handle JSON/JSONL format
+        elif path.is_file():
             if path.suffix == '.json':
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -385,29 +427,4 @@ REASONING: [Brief explanation]"""
                         examples.append(json.loads(line))
                 return examples
         
-        elif path.is_dir():
-            # Load from directory structure
-            examples = []
-            
-            # Find all narrative files
-            narrative_files = list(path.glob('**/*.txt'))
-            
-            for nf in narrative_files:
-                # Look for corresponding backstory file
-                backstory_file = nf.parent / f"{nf.stem}_backstory.txt"
-                
-                if backstory_file.exists():
-                    with open(nf, 'r', encoding='utf-8') as f:
-                        narrative = f.read()
-                    with open(backstory_file, 'r', encoding='utf-8') as f:
-                        backstory = f.read()
-                    
-                    examples.append({
-                        'id': nf.stem,
-                        'narrative': narrative,
-                        'backstory': backstory
-                    })
-            
-            return examples
-        
-        raise ValueError(f"Invalid dataset path: {dataset_path}")
+        raise ValueError(f"Invalid dataset path: {dataset_path}. Expected CSV, JSON, or JSONL file.")
