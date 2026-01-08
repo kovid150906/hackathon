@@ -1,0 +1,34 @@
+# Core Framework
+pathway>=0.8.0
+
+# LLM Providers
+groq>=0.4.0
+ollama>=0.1.0
+anthropic>=0.18.0
+openai>=1.10.0
+google-generativeai>=0.3.0
+
+# Embeddings and Vector Store
+sentence-transformers>=2.3.0
+chromadb>=0.4.22
+faiss-cpu>=1.7.4
+
+# NLP and Reranking
+transformers>=4.36.0
+torch>=2.1.0
+nltk>=3.8.1
+spacy>=3.7.0
+
+# Data Processing
+pandas>=2.1.0
+numpy>=1.24.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Utilities
+tqdm>=4.66.0
+loguru>=0.7.0
+tenacity>=8.2.3
+
+# PDF Processing (for reference materials)
+PyPDF2>=3.0.0
