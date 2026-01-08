@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from src.config import get_config
 from src.llm_providers import create_llm_provider
-from src.pathway_ingestion import PathwayVectorStore, Reranker
+from src.simple_vectorstore import SimpleVectorStore, Reranker
 from src.self_consistency import SelfConsistencyEngine
 from src.multi_agent import MultiAgentSystem
 from src.ensemble import MultiModelEnsemble, EnsembleVoter
@@ -44,20 +44,14 @@ class NarrativeConsistencyChecker:
         logger.info(f"Initialized primary LLM: {provider_name}")
     
     def _init_vector_store(self):
-        """Initialize Pathway vector store."""
-        self.vector_store = PathwayVectorStore(self.config._config)
-        logger.info("Initialized Pathway vector store")
+        """Initialize simple vector store."""
+        self.vector_store = SimpleVectorStore(self.config._config)
+        logger.info("Initialized vector store")
     
     def _init_reranker(self):
         """Initialize reranker if enabled."""
-        reranker_config = self.config.get_reranker_config()
-        
-        if reranker_config.get('enabled', True):
-            self.reranker = Reranker(reranker_config.get('model', 'cross-encoder/ms-marco-MiniLM-L-6-v2'))
-            logger.info("Initialized reranker")
-        else:
-            self.reranker = None
-            logger.info("Reranker disabled")
+        self.reranker = Reranker(self.config._config)
+        logger.info("Initialized reranker")
     
     def _init_reasoning_engines(self):
         """Initialize reasoning engines."""
