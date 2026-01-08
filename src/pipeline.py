@@ -188,7 +188,13 @@ class NarrativeConsistencyChecker:
         voter = EnsembleVoter(self.config.get_ensemble_config())
         final_result = voter.vote(predictions)
         
-        logger.info(f"Final decision for {narrative_id}: {final_result['decision']} (confidence: {final_result['confidence']:.2f})")
+        # Enhanced logging with clear verdict
+        verdict = "✓ CONSISTENT" if final_result['decision'] == 1 else "✗ INCONSISTENT"
+        logger.info("=" * 80)
+        logger.info(f"FINAL VERDICT for Example {narrative_id}: {verdict}")
+        logger.info(f"Confidence: {final_result['confidence']:.1%}")
+        logger.info(f"Reasoning: {final_result['reasoning'][:150]}...")
+        logger.info("=" * 80)
         
         return {
             'narrative_id': narrative_id,

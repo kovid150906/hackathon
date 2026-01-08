@@ -53,24 +53,35 @@ class GroqProvider(LLMProvider):
         return self.generate_with_system("You are a helpful assistant.", prompt, **kwargs)
     
     def generate_with_system(self, system: str, user: str, **kwargs) -> str:
-        """Generate text with system and user messages."""
+        """Generate text with system and user messages with rate limit retry."""
+        import time
         temperature = kwargs.get('temperature', self.temperature)
         max_tokens = kwargs.get('max_tokens', self.max_tokens)
+        max_retries = kwargs.get('max_retries', 3)
         
-        try:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user}
-                ],
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"Groq API error: {e}")
-            raise
+        for attempt in range(max_retries):
+            try:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user}
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                error_str = str(e)
+                # Check if it's a rate limit error
+                if '429' in error_str or 'rate_limit' in error_str.lower():
+                    if attempt < max_retries - 1:
+                        wait_time = 60 * (attempt + 1)  # 60s, 120s, 180s
+                        logger.warning(f"Rate limit hit. Waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
+                        time.sleep(wait_time)
+                        continue
+                logger.error(f"Groq API error: {e}")
+                raise
 
 
 class OllamaProvider(LLMProvider):

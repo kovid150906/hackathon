@@ -183,17 +183,25 @@ class PathwayVectorStore:
         
         # Chunk the text
         chunks = self.chunker.chunk_text(narrative_text, strategy=strategy)
+        logger.info(f"Created {len(chunks)} chunks")
         
-        # Generate embeddings
+        # Generate embeddings in batches
         chunk_texts = [chunk['text'] for chunk in chunks]
-        embeddings = self.embedder.encode(chunk_texts, show_progress_bar=True, convert_to_numpy=True)
+        logger.info(f"Generating embeddings for {len(chunks)} chunks (this may take a few minutes)...")
+        embeddings = self.embedder.encode(
+            chunk_texts,
+            batch_size=128,  # Larger batch for speed
+            show_progress_bar=True,
+            convert_to_numpy=True,
+            normalize_embeddings=True  # Normalize for better similarity
+        )
         
         # Add embeddings and narrative_id to chunks
         for i, chunk in enumerate(chunks):
             chunk['embedding'] = embeddings[i]
             chunk['narrative_id'] = narrative_id
         
-        logger.info(f"Generated embeddings for {len(chunks)} chunks")
+        logger.info(f"✓ Generated embeddings for {len(chunks)} chunks")
         return chunks
     
     def retrieve(self, query: str, chunks: List[Dict[str, Any]], top_k: int = 20) -> List[Dict[str, Any]]:
