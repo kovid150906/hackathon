@@ -1,8 +1,9 @@
 # Configuration for Narrative Consistency Checker
 
 # Primary LLM Provider
-# Options: groq, ollama, anthropic, openai, google
-llm_provider: "groq"
+# Options: groq, ollama, anthropic, openai, google, together, cerebras
+# RECOMMENDED: cerebras for MAXIMUM SPEED (1800 tokens/sec) - Track A optimized
+llm_provider: "cerebras"
 
 # Provider Configurations
 providers:
@@ -10,7 +11,7 @@ providers:
     model: "llama-3.3-70b-versatile"
     temperature: 0.1
     max_tokens: 4096
-    cost_per_million_tokens: 0 # FREE
+    cost_per_million_tokens: 0 # FREE but has rate limits
 
   ollama:
     base_url: "http://localhost:11434"
@@ -18,6 +19,18 @@ providers:
     temperature: 0.1
     num_ctx: 8192
     cost_per_million_tokens: 0 # FREE (local)
+  
+  together:
+    model: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+    temperature: 0.1
+    max_tokens: 4096
+    cost_per_million_tokens: 0 # FREE tier available, faster than Groq
+  
+  cerebras:
+    model: "llama3.1-8b"
+    temperature: 0.0
+    max_tokens: 4096
+    cost_per_million_tokens: 0 # FREE and VERY FAST (1800 tokens/sec)
 
   anthropic:
     model: "claude-3-5-sonnet-20241022"
@@ -45,38 +58,38 @@ embeddings:
 
 # Reranker Configuration
 reranker:
-  enabled: true
+  enabled: false
   model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
   top_k: 50 # Get top 50 before reranking
   final_k: 20 # Keep top 20 after reranking
 
-# Pathway Configuration
+# Pathway Configuration (Track A Requirement - MUST BE USED)
 pathway:
   vector_store:
     dimension: 1024 # BGE-large dimension
     collection_name: "narrative_chunks"
   chunking:
-    strategy: "semantic" # semantic, fixed, or hybrid
-    chunk_size: 1000
-    chunk_overlap: 200
-    min_chunk_size: 500
+    strategy: "hybrid" # hybrid combines semantic + fixed for best results
+    chunk_size: 700 # Optimized for speed while maintaining quality
+    chunk_overlap: 100 # Minimal overlap for faster processing
+    min_chunk_size: 300 # Lower threshold for better granularity
 
 # Self-Consistency Configuration
 self_consistency:
   enabled: true
-  num_chains: 10 # Number of independent reasoning chains
-  voting_strategy: "weighted" # majority or weighted
+  num_chains: 3 # Minimal chains for maximum speed (parallel processing maintains quality)
+  voting_strategy: "majority" # Majority voting is faster than weighted
   confidence_threshold: 0.6
 
 # Ensemble Configuration
 ensemble:
-  enabled: true
+  enabled: false # Disabled to reduce API calls when self-consistency is active
   models:
-    - provider: "groq"
-      model: "llama-3.3-70b-versatile"
+    - provider: "together"
+      model: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
       weight: 1.0
-    - provider: "ollama"
-      model: "llama3.1:8b"
+    - provider: "cerebras"
+      model: "llama3.1-70b"
       weight: 0.8
   voting_strategy: "weighted" # majority, weighted, or soft
   min_agreement: 0.6
@@ -87,23 +100,23 @@ multi_agent:
   agents:
     prosecutor:
       role: "Find evidence AGAINST consistency"
-      temperature: 0.2
+      temperature: 0.0 # Zero temp for fastest inference
     defender:
       role: "Find evidence FOR consistency"
-      temperature: 0.2
+      temperature: 0.0 # Zero temp for fastest inference
     investigator:
       role: "Neutral fact-finding"
       temperature: 0.0
     judge:
       role: "Final decision based on all evidence"
       temperature: 0.0
-  deliberation_rounds: 3
+  deliberation_rounds: 1 # Single round with parallel agents for maximum speed
 
-# Evidence Extraction
+# Evidence Extraction (Pathway-based hybrid search)
 evidence:
-  max_passages: 30
-  min_relevance_score: 0.5
-  context_window: 500 # Characters before/after match
+  max_passages: 20 # Reduced for faster processing
+  min_relevance_score: 0.6 # Higher threshold = fewer passages to process
+  context_window: 400 # Slightly smaller window for speed
 
 # Output Configuration
 output:
@@ -112,8 +125,8 @@ output:
   save_detailed_logs: true
   log_directory: "logs"
 
-# Performance
+# Performance (Maximize parallelization)
 performance:
   cache_embeddings: true
   parallel_processing: true
-  max_workers: 4
+  max_workers: 10 # Increased for maximum parallel API calls

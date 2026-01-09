@@ -41,6 +41,33 @@ class SimpleVectorStore:
             self.embeddings = self.embedder.encode(texts, convert_to_numpy=True)
             logger.info(f"Added {len(chunks)} chunks to vector store")
     
+    def ingest_narrative(self, text: str, narrative_id: str, strategy: str = "semantic") -> List[Dict[str, Any]]:
+        """Ingest narrative and return chunks (API compatible with PathwayVectorStore)."""
+        self.clear()
+        chunks = self._chunk_text(text)
+        
+        chunk_dicts = []
+        for i, chunk in enumerate(chunks):
+            chunk_dict = {
+                'text': chunk,
+                'metadata': {'narrative_id': narrative_id, 'chunk_id': i},
+                'chunk_id': i
+            }
+            self.chunks.append(chunk_dict)
+            chunk_dicts.append(chunk_dict)
+        
+        # Generate embeddings with progress indication
+        if self.chunks:
+            logger.info(f"Generating embeddings for {len(chunks)} chunks (this may take 15-30 seconds)...")
+            texts = [c['text'] for c in self.chunks]
+            self.embeddings = self.embedder.encode(texts, 
+                                                   convert_to_numpy=True,
+                                                   show_progress_bar=True,
+                                                   batch_size=32)
+            logger.info(f"✅ Ingested {len(chunks)} chunks for narrative {narrative_id}")
+        
+        return chunk_dicts
+    
     def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
         """Simple text chunking."""
         chunks = []
@@ -104,8 +131,14 @@ class Reranker:
         if self.enabled:
             model_name = reranker_config.get('model', 'cross-encoder/ms-marco-MiniLM-L-6-v2')
             logger.info(f"Loading reranker model: {model_name}")
-            self.model = CrossEncoder(model_name)
-            self.final_k = reranker_config.get('final_k', 20)
+            try:
+                self.model = CrossEncoder(model_name, local_files_only=True)
+                self.final_k = reranker_config.get('final_k', 20)
+                logger.info(f"Loaded reranker from cache")
+            except Exception as e:
+                logger.warning(f"Could not load reranker (using cache-only): {e}. Disabling reranker.")
+                self.enabled = False
+                self.model = None
         else:
             self.model = None
     

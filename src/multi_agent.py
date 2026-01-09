@@ -2,6 +2,7 @@
 Multi-agent adversarial reasoning system for narrative consistency checking.
 """
 from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 from src.llm_providers import LLMProvider
 
@@ -479,13 +480,20 @@ class MultiAgentSystem:
         logger.info("Initialized MultiAgentSystem with 4 agents")
     
     def deliberate(self, backstory: str, evidence: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Run multi-agent deliberation."""
-        logger.info(f"Starting {self.deliberation_rounds} rounds of deliberation")
+        """Run multi-agent deliberation with parallel initial analyses."""
+        logger.info(f"Starting multi-agent deliberation")
         
-        # Initial analyses
-        prosecutor_case = self.prosecutor.analyze(backstory, evidence)
-        defender_case = self.defender.analyze(backstory, evidence)
-        investigator_report = self.investigator.analyze(backstory, evidence)
+        # Run initial analyses in parallel for speed
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            prosecutor_future = executor.submit(self.prosecutor.analyze, backstory, evidence)
+            defender_future = executor.submit(self.defender.analyze, backstory, evidence)
+            investigator_future = executor.submit(self.investigator.analyze, backstory, evidence)
+            
+            prosecutor_case = prosecutor_future.result()
+            defender_case = defender_future.result()
+            investigator_report = investigator_future.result()
+        
+        logger.info("✓ All agents completed initial analysis")
         
         # Judge makes final decision
         final_decision = self.judge.make_decision(
