@@ -5,8 +5,16 @@ import os
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
-from dotenv import load_dotenv
 from loguru import logger
+
+# Optional dotenv support (for .env files)
+try:
+    from dotenv import load_dotenv
+    DOTENV_AVAILABLE = True
+except ImportError:
+    DOTENV_AVAILABLE = False
+    load_dotenv = lambda: None  # No-op function
+    logger.debug("python-dotenv not available, skipping .env file loading")
 
 class Config:
     """Configuration management class."""
@@ -15,17 +23,23 @@ class Config:
         """Initialize configuration."""
         self.config_path = Path(config_path)
         self._config: Dict[str, Any] = {}
-        self._load_env()
+        
+        # Load environment variables if dotenv available
+        if DOTENV_AVAILABLE:
+            load_dotenv()
         self._load_config()
     
     def _load_env(self):
         """Load environment variables from .env file."""
-        env_path = Path(".env")
-        if env_path.exists():
-            load_dotenv(env_path)
-            logger.info("Loaded environment variables from .env")
+        if DOTENV_AVAILABLE:
+            env_path = Path(".env")
+            if env_path.exists():
+                load_dotenv(env_path)
+                logger.info("Loaded environment variables from .env")
+            else:
+                logger.warning("No .env file found. Using environment variables only.")
         else:
-            logger.warning("No .env file found. Using environment variables only.")
+            logger.debug(".env file support not available (python-dotenv not installed)")
     
     def _load_config(self):
         """Load configuration from YAML file."""

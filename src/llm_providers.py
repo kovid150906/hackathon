@@ -4,6 +4,10 @@ Abstract base class for LLM providers with implementations for multiple provider
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 import os
+import hashlib
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from loguru import logger
 
 class LLMProvider(ABC):
@@ -27,9 +31,34 @@ class LLMProvider(ABC):
         """Generate text with system and user messages."""
         pass
     
-    def batch_generate(self, prompts: List[str], **kwargs) -> List[str]:
-        """Generate text for multiple prompts."""
-        return [self.generate(prompt, **kwargs) for prompt in prompts]
+    def batch_generate(self, prompts: List[str], parallel: bool = True, max_workers: int = 10, **kwargs) -> List[str]:
+        """Generate text for multiple prompts with optional parallel processing."""
+        if not parallel or len(prompts) <= 1:
+            return [self.generate(prompt, **kwargs) for prompt in prompts]
+        
+        results = [None] * len(prompts)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {executor.submit(self.generate, prompt, **kwargs): idx 
+                           for idx, prompt in enumerate(prompts)}
+            
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as e:
+                    logger.error(f"Error in batch_generate for prompt {idx}: {e}")
+                    results[idx] = f"ERROR: {str(e)}"
+        
+        return results
+    
+    def _cache_key(self, prompt: str, **kwargs) -> str:
+        """Generate cache key for a prompt."""
+        key_data = {
+            'prompt': prompt,
+            'model': self.model,
+            'temperature': kwargs.get('temperature', self.temperature)
+        }
+        return hashlib.md5(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
 
 
 class GroqProvider(LLMProvider):
@@ -236,6 +265,96 @@ class GoogleProvider(LLMProvider):
         return self.generate(combined_prompt, **kwargs)
 
 
+class TogetherAIProvider(LLMProvider):
+    """Together AI provider (FREE tier available, faster than Groq)."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        api_key = config.get('api_key') or os.getenv('TOGETHER_API_KEY')
+        if not api_key:
+            raise ValueError("Together AI API key not found. Set TOGETHER_API_KEY environment variable.")
+        
+        try:
+            from openai import OpenAI
+            # Together AI uses OpenAI-compatible API
+            self._client = OpenAI(
+                api_key=api_key,
+                base_url="https://api.together.xyz/v1"
+            )
+            logger.info(f"Initialized Together AI provider with model: {self.model}")
+        except ImportError:
+            raise ImportError("openai package not installed. Run: pip install openai")
+    
+    def generate(self, prompt: str, **kwargs) -> str:
+        """Generate text from prompt."""
+        return self.generate_with_system("You are a helpful assistant.", prompt, **kwargs)
+    
+    def generate_with_system(self, system: str, user: str, **kwargs) -> str:
+        """Generate text with system and user messages."""
+        temperature = kwargs.get('temperature', self.temperature)
+        max_tokens = kwargs.get('max_tokens', self.max_tokens)
+        
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user}
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Together AI API error: {e}")
+            raise
+
+
+class CerebrasProvider(LLMProvider):
+    """Cerebras AI provider (FREE and VERY FAST)."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        api_key = config.get('api_key') or os.getenv('CEREBRAS_API_KEY')
+        if not api_key:
+            raise ValueError("Cerebras API key not found. Set CEREBRAS_API_KEY environment variable.")
+        
+        try:
+            from openai import OpenAI
+            # Cerebras uses OpenAI-compatible API
+            self._client = OpenAI(
+                api_key=api_key,
+                base_url="https://api.cerebras.ai/v1"
+            )
+            logger.info(f"Initialized Cerebras provider with model: {self.model}")
+        except ImportError:
+            raise ImportError("openai package not installed. Run: pip install openai")
+    
+    def generate(self, prompt: str, **kwargs) -> str:
+        """Generate text from prompt."""
+        return self.generate_with_system("You are a helpful assistant.", prompt, **kwargs)
+    
+    def generate_with_system(self, system: str, user: str, **kwargs) -> str:
+        """Generate text with system and user messages."""
+        temperature = kwargs.get('temperature', self.temperature)
+        max_tokens = kwargs.get('max_tokens', self.max_tokens)
+        
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user}
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Cerebras API error: {e}")
+            raise
+
+
 def create_llm_provider(provider_name: str, config: Dict[str, Any]) -> LLMProvider:
     """Factory function to create LLM provider."""
     providers = {
@@ -243,7 +362,9 @@ def create_llm_provider(provider_name: str, config: Dict[str, Any]) -> LLMProvid
         'ollama': OllamaProvider,
         'anthropic': AnthropicProvider,
         'openai': OpenAIProvider,
-        'google': GoogleProvider
+        'google': GoogleProvider,
+        'together': TogetherAIProvider,
+        'cerebras': CerebrasProvider
     }
     
     provider_class = providers.get(provider_name.lower())

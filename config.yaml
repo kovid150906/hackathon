@@ -1,16 +1,17 @@
 # Configuration for Narrative Consistency Checker
 
 # Primary LLM Provider
-# Options: groq, ollama, anthropic, openai, google
+# Options: groq, ollama, anthropic, openai, google, together, cerebras
+# Using Groq for FREE and fast inference
 llm_provider: "groq"
 
 # Provider Configurations
 providers:
   groq:
-    model: "llama-3.3-70b-versatile"
+    model: "llama3-8b-8192"
     temperature: 0.1
     max_tokens: 4096
-    cost_per_million_tokens: 0 # FREE
+    cost_per_million_tokens: 0 # FREE but has rate limits
 
   ollama:
     base_url: "http://localhost:11434"
@@ -18,6 +19,18 @@ providers:
     temperature: 0.1
     num_ctx: 8192
     cost_per_million_tokens: 0 # FREE (local)
+  
+  together:
+    model: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+    temperature: 0.1
+    max_tokens: 4096
+    cost_per_million_tokens: 0 # FREE tier available, faster than Groq
+  
+  cerebras:
+    model: "llama3.1-8b"
+    temperature: 0.0
+    max_tokens: 4096
+    cost_per_million_tokens: 0 # FREE and VERY FAST (1800 tokens/sec)
 
   anthropic:
     model: "claude-3-5-sonnet-20241022"
@@ -32,10 +45,10 @@ providers:
     cost_per_million_tokens: 10000 # $10 per million input tokens
 
   google:
-    model: "gemini-1.5-pro"
+    model: "gemini-1.5-flash"
     temperature: 0.1
     max_output_tokens: 8192
-    cost_per_million_tokens: 1250 # $1.25 per million input tokens
+    cost_per_million_tokens: 0 # Free tier available
 
 # Embeddings Configuration
 embeddings:
@@ -45,65 +58,65 @@ embeddings:
 
 # Reranker Configuration
 reranker:
-  enabled: true
+  enabled: false
   model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
   top_k: 50 # Get top 50 before reranking
   final_k: 20 # Keep top 20 after reranking
 
-# Pathway Configuration
+# Pathway Configuration (Track A Requirement - MUST BE USED)
 pathway:
   vector_store:
     dimension: 1024 # BGE-large dimension
     collection_name: "narrative_chunks"
   chunking:
-    strategy: "semantic" # semantic, fixed, or hybrid
-    chunk_size: 1000
-    chunk_overlap: 200
-    min_chunk_size: 500
+    strategy: "fixed" # Fixed is fastest
+    chunk_size: 1200 # Larger chunks = fewer chunks = faster
+    chunk_overlap: 50 # Minimal overlap for speed
+    min_chunk_size: 400 # Larger minimum
 
 # Self-Consistency Configuration
 self_consistency:
   enabled: true
-  num_chains: 10 # Number of independent reasoning chains
-  voting_strategy: "weighted" # majority or weighted
+  num_chains: 1 # Single chain for maximum speed
+  voting_strategy: "majority" # Majority voting is faster than weighted
   confidence_threshold: 0.6
 
 # Ensemble Configuration
 ensemble:
-  enabled: true
+  enabled: false # Disabled to reduce API calls when self-consistency is active
   models:
-    - provider: "groq"
-      model: "llama-3.3-70b-versatile"
+    - provider: "together"
+      model: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
       weight: 1.0
-    - provider: "ollama"
-      model: "llama3.1:8b"
+    - provider: "cerebras"
+      model: "llama3.1-70b"
       weight: 0.8
   voting_strategy: "weighted" # majority, weighted, or soft
   min_agreement: 0.6
 
 # Multi-Agent Configuration
 multi_agent:
-  enabled: true
+  enabled: false
   agents:
     prosecutor:
       role: "Find evidence AGAINST consistency"
-      temperature: 0.2
+      temperature: 0.0 # Zero temp for fastest inference
     defender:
       role: "Find evidence FOR consistency"
-      temperature: 0.2
+      temperature: 0.0 # Zero temp for fastest inference
     investigator:
       role: "Neutral fact-finding"
       temperature: 0.0
     judge:
       role: "Final decision based on all evidence"
       temperature: 0.0
-  deliberation_rounds: 3
+  deliberation_rounds: 1 # Single round with parallel agents for maximum speed
 
-# Evidence Extraction
+# Evidence Extraction (Pathway-based hybrid search)
 evidence:
-  max_passages: 30
-  min_relevance_score: 0.5
-  context_window: 500 # Characters before/after match
+  max_passages: 10 # Minimal passages for maximum speed
+  min_relevance_score: 0.65 # Higher threshold = fewer passages
+  context_window: 300 # Smaller window for speed
 
 # Output Configuration
 output:
@@ -112,8 +125,8 @@ output:
   save_detailed_logs: true
   log_directory: "logs"
 
-# Performance
+# Performance (Maximize parallelization)
 performance:
   cache_embeddings: true
   parallel_processing: true
-  max_workers: 4
+  max_workers: 10 # Increased for maximum parallel API calls

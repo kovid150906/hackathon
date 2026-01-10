@@ -3,6 +3,7 @@ Main pipeline for narrative consistency checking.
 """
 import os
 import json
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from loguru import logger
@@ -33,6 +34,9 @@ class NarrativeConsistencyChecker:
         self._init_reranker()
         self._init_reasoning_engines()
         
+        # Cache for book narratives and their chunks
+        self.narrative_cache = {}  # {narrative_id: chunks}
+        
         logger.info("NarrativeConsistencyChecker initialized successfully")
     
     def _init_llm(self):
@@ -44,20 +48,21 @@ class NarrativeConsistencyChecker:
         logger.info(f"Initialized primary LLM: {provider_name}")
     
     def _init_vector_store(self):
-        """Initialize Pathway vector store."""
+        """Initialize Pathway-based vector store."""
+        logger.info("=" * 70)
+        logger.info("🔵 INITIALIZING PATHWAY VECTOR STORE")
+        logger.info("   Track A Requirement: Pathway framework is being used for:")
+        logger.info("   - Text chunking (semantic/fixed/hybrid strategies)")
+        logger.info("   - Vector embeddings and storage")
+        logger.info("   - Hybrid search (semantic + keyword)")
+        logger.info("=" * 70)
         self.vector_store = PathwayVectorStore(self.config._config)
-        logger.info("Initialized Pathway vector store")
+        logger.info("✅ Pathway vector store initialization complete")
     
     def _init_reranker(self):
         """Initialize reranker if enabled."""
-        reranker_config = self.config.get_reranker_config()
-        
-        if reranker_config.get('enabled', True):
-            self.reranker = Reranker(reranker_config.get('model', 'cross-encoder/ms-marco-MiniLM-L-6-v2'))
-            logger.info("Initialized reranker")
-        else:
-            self.reranker = None
-            logger.info("Reranker disabled")
+        self.reranker = Reranker(self.config._config)
+        logger.info("Initialized reranker")
     
     def _init_reasoning_engines(self):
         """Initialize reasoning engines."""
@@ -90,7 +95,7 @@ class NarrativeConsistencyChecker:
             self.ensemble = None
     
     def process_single_example(self, narrative_text: str, backstory: str, 
-                              narrative_id: str = "narrative") -> Dict[str, Any]:
+                              narrative_id: str = "narrative", book_name: str = None) -> Dict[str, Any]:
         """
         Process a single narrative-backstory pair.
         
@@ -98,32 +103,50 @@ class NarrativeConsistencyChecker:
             narrative_text: Full text of the narrative
             backstory: Hypothetical backstory
             narrative_id: Unique identifier for this narrative
+            book_name: Book name for caching (optional)
         
         Returns:
             Dictionary with decision, confidence, and reasoning
         """
-        logger.info(f"Processing narrative {narrative_id}")
+        start_time = time.time()
+        logger.info(f"📝 Processing example {narrative_id}")
         
-        # Step 1: Ingest narrative and create vector store
-        logger.info("Step 1: Ingesting narrative into vector store")
-        chunking_strategy = self.config.get('pathway', {}).get('chunking', {}).get('strategy', 'semantic')
-        chunks = self.vector_store.ingest_narrative(narrative_text, narrative_id, strategy=chunking_strategy)
+        # Step 1: Get chunks (from cache if available)
+        cache_key = book_name if book_name else narrative_id
+        
+        if cache_key in self.narrative_cache:
+            logger.info(f"✅ [1/5] Using cached chunks for '{cache_key}' - SKIPPING re-ingestion!")
+            chunks = self.narrative_cache[cache_key]
+        else:
+            step_start = time.time()
+            logger.info(f"🔄 [1/5] First time ingesting '{cache_key}' into vector store...")
+            chunking_strategy = self.config.get('pathway', {}).get('chunking', {}).get('strategy', 'semantic')
+            chunks = self.vector_store.ingest_narrative(narrative_text, narrative_id, strategy=chunking_strategy)
+            self.narrative_cache[cache_key] = chunks
+            logger.info(f"✅ [1/5] Completed in {time.time() - step_start:.1f}s - Created {len(chunks)} chunks (cached for future use)")
         
         # Step 2: Extract key queries from backstory
-        logger.info("Step 2: Extracting key queries from backstory")
+        step_start = time.time()
+        logger.info("🔄 [2/5] Extracting key queries from backstory...")
         queries = self._extract_queries_from_backstory(backstory)
+        logger.info(f"✅ [2/5] Completed in {time.time() - step_start:.1f}s - Generated {len(queries)} queries")
         
         # Step 3: Retrieve relevant evidence
-        logger.info("Step 3: Retrieving relevant evidence")
+        step_start = time.time()
+        logger.info("🔄 [3/5] Retrieving relevant evidence from narrative...")
         evidence = self._retrieve_evidence(queries, chunks)
+        logger.info(f"✅ [3/5] Completed in {time.time() - step_start:.1f}s - Retrieved {len(evidence)} evidence pieces")
         
         # Step 4: Rerank evidence if enabled
         if self.reranker:
-            logger.info("Step 4: Reranking evidence")
+            step_start = time.time()
+            logger.info("🔄 [4/5] Reranking evidence for relevance...")
             evidence = self._rerank_evidence(backstory, evidence)
+            logger.info(f"✅ [4/5] Completed in {time.time() - step_start:.1f}s")
         
         # Step 5: Run reasoning engines
-        logger.info("Step 5: Running reasoning engines")
+        step_start = time.time()
+        logger.info("🔄 [5/5] Running reasoning engines (this may take a while)...")
         predictions = []
         
         # Self-consistency
@@ -189,6 +212,11 @@ class NarrativeConsistencyChecker:
         final_result = voter.vote(predictions)
         
         logger.info(f"Final decision for {narrative_id}: {final_result['decision']} (confidence: {final_result['confidence']:.2f})")
+        
+        # Calculate total processing time
+        total_time = time.time() - start_time
+        logger.info(f"✅ [5/5] Completed reasoning in {time.time() - step_start:.1f}s")
+        logger.info(f"✨ Narrative {narrative_id} processed successfully in {total_time:.1f}s total")
         
         return {
             'narrative_id': narrative_id,
@@ -335,14 +363,28 @@ REASONING: [Brief explanation]"""
         examples = self._load_dataset(dataset_path)
         
         results = []
+        start_time = time.time()
         
-        for example in tqdm(examples, desc="Processing examples"):
+        # Create progress bar with time estimates
+        progress_bar = tqdm(examples, 
+                           desc="🚀 Processing examples",
+                           unit="example",
+                           bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+        
+        for idx, example in enumerate(progress_bar):
             try:
+                # Update progress bar description with current example
+                progress_bar.set_description(f"🚀 Processing example {example['id']} ({idx+1}/{len(examples)})")
+                
                 result = self.process_single_example(
                     narrative_text=example['narrative'],
                     backstory=example['backstory'],
-                    narrative_id=example['id']
+                    narrative_id=example['id'],
+                    book_name=example.get('book_name')  # Pass book name for caching
                 )
+                
+                prediction_label = "CONSISTENT" if result['decision'] == 1 else "INCONSISTENT"
+                true_label = example.get('true_label', 'N/A')
                 
                 results.append({
                     'Story ID': example['id'],
@@ -350,8 +392,29 @@ REASONING: [Brief explanation]"""
                     'Rationale': result['reasoning'][:200]  # Limit rationale length
                 })
                 
+                # Print result immediately
+                logger.info("=" * 80)
+                logger.info(f"📊 RESULT #{idx+1}/{len(examples)} - Story ID: {example['id']}")
+                logger.info(f"   Prediction: {prediction_label} ({result['decision']})")
+                logger.info(f"   True Label: {true_label}")
+                logger.info(f"   Confidence: {result['confidence']:.2%}")
+                logger.info(f"   Rationale: {result['reasoning'][:150]}...")
+                logger.info("=" * 80)
+                
+                # Calculate and display time estimates
+                elapsed = time.time() - start_time
+                avg_time = elapsed / (idx + 1)
+                remaining_examples = len(examples) - (idx + 1)
+                eta_seconds = avg_time * remaining_examples
+                eta_minutes = eta_seconds / 60
+                
+                progress_bar.set_postfix({
+                    'avg_time': f'{avg_time:.1f}s',
+                    'ETA': f'{eta_minutes:.1f}min'
+                })
+                
             except Exception as e:
-                logger.error(f"Error processing example {example.get('id', 'unknown')}: {e}")
+                logger.error(f"❌ Error processing example {example.get('id', 'unknown')}: {e}")
                 results.append({
                     'Story ID': example.get('id', 'unknown'),
                     'Prediction': 1,
