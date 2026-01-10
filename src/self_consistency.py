@@ -3,6 +3,7 @@ Self-consistency reasoning engine with multiple independent chains.
 """
 from typing import List, Dict, Any, Tuple
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 import json
 from src.llm_providers import LLMProvider
@@ -27,7 +28,7 @@ class SelfConsistencyEngine:
     
     def generate_reasoning_chains(self, narrative: str, backstory: str, evidence: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Generate multiple independent reasoning chains.
+        Generate multiple independent reasoning chains in parallel.
         
         Args:
             narrative: Full narrative text (or summary)
@@ -40,34 +41,47 @@ class SelfConsistencyEngine:
         prompts = self._create_varied_prompts(narrative, backstory, evidence)
         chains = []
         
-        for i, prompt in enumerate(prompts[:self.num_chains]):
-            logger.info(f"Generating reasoning chain {i+1}/{self.num_chains}")
-            
-            try:
-                # Extract content string from prompt dict
+        # Parallel processing for speed
+        with ThreadPoolExecutor(max_workers=min(10, self.num_chains)) as executor:
+            future_to_idx = {}
+            for i, prompt in enumerate(prompts[:self.num_chains]):
                 prompt_text = prompt['content'] if isinstance(prompt, dict) else prompt
-                response = self.llm.generate(prompt_text, temperature=0.2)
-                parsed = self._parse_response(response)
-                chains.append({
-                    'chain_id': i,
-                    'prompt_type': prompt.get('type', 'unknown') if isinstance(prompt, dict) else 'unknown',
-                    'decision': parsed['decision'],
-                    'confidence': parsed['confidence'],
-                    'reasoning': parsed['reasoning'],
-                    'raw_response': response
-                })
-            except Exception as e:
-                logger.error(f"Error in chain {i}: {e}")
-                chains.append({
-                    'chain_id': i,
-                    'prompt_type': prompt.get('type', 'unknown') if isinstance(prompt, dict) else 'unknown',
-                    'decision': None,
-                    'confidence': 0.0,
-                    'reasoning': f"Error: {str(e)}",
-                    'raw_response': ""
-                })
+                future = executor.submit(self._generate_single_chain, i, prompt, prompt_text)
+                future_to_idx[future] = i
+            
+            for future in as_completed(future_to_idx):
+                i = future_to_idx[future]
+                try:
+                    chain = future.result()
+                    chains.append(chain)
+                    logger.info(f"✓ Chain {i+1}/{self.num_chains} completed: {chain['decision']}")
+                except Exception as e:
+                    logger.error(f"✗ Chain {i+1}/{self.num_chains} failed: {e}")
+                    chains.append({
+                        'chain_id': i,
+                        'prompt_type': 'unknown',
+                        'decision': None,
+                        'confidence': 0.0,
+                        'reasoning': f"Error: {str(e)}",
+                        'raw_response': ""
+                    })
         
+        # Sort by chain_id for consistent ordering
+        chains.sort(key=lambda x: x['chain_id'])
         return chains
+    
+    def _generate_single_chain(self, chain_id: int, prompt: Dict[str, str], prompt_text: str) -> Dict[str, Any]:
+        """Generate a single reasoning chain."""
+        response = self.llm.generate(prompt_text, temperature=0.2)
+        parsed = self._parse_response(response)
+        return {
+            'chain_id': chain_id,
+            'prompt_type': prompt.get('type', 'unknown') if isinstance(prompt, dict) else 'unknown',
+            'decision': parsed['decision'],
+            'confidence': parsed['confidence'],
+            'reasoning': parsed['reasoning'],
+            'raw_response': response
+        }
     
     def _create_varied_prompts(self, narrative: str, backstory: str, evidence: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         """Create diverse prompts for different reasoning approaches."""

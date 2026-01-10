@@ -89,8 +89,13 @@ class NarrativeConsistencyChecker:
         else:
             self.ensemble = None
     
-    def process_single_example(self, narrative_text: str, backstory: str, 
-                              narrative_id: str = "narrative") -> Dict[str, Any]:
+    def process_single_example(
+        self,
+        narrative_text: str,
+        backstory: str,
+        story_id: str = "story",
+        narrative_id: str = "narrative",
+    ) -> Dict[str, Any]:
         """
         Process a single narrative-backstory pair.
         
@@ -102,7 +107,7 @@ class NarrativeConsistencyChecker:
         Returns:
             Dictionary with decision, confidence, and reasoning
         """
-        logger.info(f"Processing narrative {narrative_id}")
+        logger.info(f"Processing story {story_id} (narrative: {narrative_id})")
         
         # Step 1: Ingest narrative and create vector store
         logger.info("Step 1: Ingesting narrative into vector store")
@@ -191,12 +196,13 @@ class NarrativeConsistencyChecker:
         # Enhanced logging with clear verdict
         verdict = "✓ CONSISTENT" if final_result['decision'] == 1 else "✗ INCONSISTENT"
         logger.info("=" * 80)
-        logger.info(f"FINAL VERDICT for Example {narrative_id}: {verdict}")
+        logger.info(f"FINAL VERDICT for Example {story_id}: {verdict}")
         logger.info(f"Confidence: {final_result['confidence']:.1%}")
         logger.info(f"Reasoning: {final_result['reasoning'][:150]}...")
         logger.info("=" * 80)
         
         return {
+            'story_id': story_id,
             'narrative_id': narrative_id,
             'decision': final_result['decision'],
             'confidence': final_result['confidence'],
@@ -297,14 +303,14 @@ REASONING: [Brief explanation]"""
         for line in response.split('\n'):
             line_stripped = line.strip()
             
-            if line_stripped.startswith('DECISION:'):
-                decision_text = line_stripped.split(':', 1)[1].strip().upper()
-                if 'INCONSISTENT' in decision_text:
+            if line_stripped.upper().startswith('DECISION:'):
+                decision_text = line_stripped.split(':', 1)[1].strip().lower()
+                if any(t in decision_text for t in ['inconsistent', 'inconistent', 'inconsistant', 'contradict']):
                     decision = 0
-                elif 'CONSISTENT' in decision_text:
+                elif 'consistent' in decision_text:
                     decision = 1
             
-            elif line_stripped.startswith('CONFIDENCE:'):
+            elif line_stripped.upper().startswith('CONFIDENCE:'):
                 try:
                     conf_text = line_stripped.split(':', 1)[1].strip()
                     confidence = float(conf_text.split()[0])
@@ -312,7 +318,7 @@ REASONING: [Brief explanation]"""
                 except:
                     pass
             
-            elif line_stripped.startswith('REASONING:'):
+            elif line_stripped.upper().startswith('REASONING:'):
                 reasoning = line_stripped.split(':', 1)[1].strip()
         
         if not reasoning:
@@ -347,7 +353,9 @@ REASONING: [Brief explanation]"""
                 result = self.process_single_example(
                     narrative_text=example['narrative'],
                     backstory=example['backstory'],
-                    narrative_id=example['id']
+                    story_id=example['id'],
+                    # Cache and reuse expensive chunking/embeddings per book
+                    narrative_id=example.get('book_name', example['id']),
                 )
                 
                 results.append({

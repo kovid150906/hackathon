@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 from loguru import logger
 import numpy as np
 from sentence_transformers import SentenceTransformer
+import hashlib
 
 
 class NarrativeChunker:
@@ -156,6 +157,10 @@ class PathwayVectorStore:
         self.embedding_model_name = config.get('embeddings', {}).get('model', 'BAAI/bge-large-en-v1.5')
         self.dimension = config.get('pathway', {}).get('vector_store', {}).get('dimension', 1024)
         self.collection_name = config.get('pathway', {}).get('vector_store', {}).get('collection_name', 'narrative_chunks')
+
+        self._cache_embeddings = config.get('performance', {}).get('cache_embeddings', True)
+        # Cache ingested chunks per narrative to avoid re-chunking/re-embedding the same book
+        self._ingest_cache: Dict[str, Dict[str, Any]] = {}
         
         # Initialize embedding model
         self.embedder = SentenceTransformer(self.embedding_model_name)
@@ -180,6 +185,14 @@ class PathwayVectorStore:
             List of chunks with embeddings
         """
         logger.info(f"Ingesting narrative {narrative_id} with {len(narrative_text)} characters")
+
+        if self._cache_embeddings:
+            cache_key = f"{narrative_id}|{strategy}|{self.chunker.chunk_size}|{self.chunker.overlap}|{self.chunker.min_chunk_size}|{self.embedding_model_name}"
+            text_fingerprint = hashlib.sha256(narrative_text.encode('utf-8', errors='ignore')).hexdigest()
+            cached = self._ingest_cache.get(cache_key)
+            if cached and cached.get('fingerprint') == text_fingerprint:
+                logger.info(f"Using cached chunks+embeddings for narrative {narrative_id}")
+                return cached['chunks']
         
         # Chunk the text
         chunks = self.chunker.chunk_text(narrative_text, strategy=strategy)
@@ -202,6 +215,12 @@ class PathwayVectorStore:
             chunk['narrative_id'] = narrative_id
         
         logger.info(f"✓ Generated embeddings for {len(chunks)} chunks")
+
+        if self._cache_embeddings:
+            self._ingest_cache[cache_key] = {
+                'fingerprint': text_fingerprint,
+                'chunks': chunks,
+            }
         return chunks
     
     def retrieve(self, query: str, chunks: List[Dict[str, Any]], top_k: int = 20) -> List[Dict[str, Any]]:
