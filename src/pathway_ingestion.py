@@ -10,12 +10,20 @@ This implementation uses Pathway Python framework for:
 - Vector embeddings storage and retrieval
 - Hybrid search (semantic + keyword matching)
 """
-import pathway as pw
+import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from loguru import logger
 import numpy as np
 from sentence_transformers import SentenceTransformer
+
+# Pathway import with Windows stub fallback
+try:
+    import pathway as pw
+except ImportError:
+    # Use stub for Windows compatibility
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    import pathway_stub as pw
 
 # Optional Pathway LLM extensions (used if available)
 try:

@@ -34,6 +34,9 @@ class NarrativeConsistencyChecker:
         self._init_reranker()
         self._init_reasoning_engines()
         
+        # Cache for book narratives and their chunks
+        self.narrative_cache = {}  # {narrative_id: chunks}
+        
         logger.info("NarrativeConsistencyChecker initialized successfully")
     
     def _init_llm(self):
@@ -92,7 +95,7 @@ class NarrativeConsistencyChecker:
             self.ensemble = None
     
     def process_single_example(self, narrative_text: str, backstory: str, 
-                              narrative_id: str = "narrative") -> Dict[str, Any]:
+                              narrative_id: str = "narrative", book_name: str = None) -> Dict[str, Any]:
         """
         Process a single narrative-backstory pair.
         
@@ -100,19 +103,27 @@ class NarrativeConsistencyChecker:
             narrative_text: Full text of the narrative
             backstory: Hypothetical backstory
             narrative_id: Unique identifier for this narrative
+            book_name: Book name for caching (optional)
         
         Returns:
             Dictionary with decision, confidence, and reasoning
         """
         start_time = time.time()
-        logger.info(f"📝 Processing narrative {narrative_id}")
+        logger.info(f"📝 Processing example {narrative_id}")
         
-        # Step 1: Ingest narrative and create vector store
-        step_start = time.time()
-        logger.info("🔄 [1/5] Ingesting narrative into vector store...")
-        chunking_strategy = self.config.get('pathway', {}).get('chunking', {}).get('strategy', 'semantic')
-        chunks = self.vector_store.ingest_narrative(narrative_text, narrative_id, strategy=chunking_strategy)
-        logger.info(f"✅ [1/5] Completed in {time.time() - step_start:.1f}s - Created {len(chunks)} chunks")
+        # Step 1: Get chunks (from cache if available)
+        cache_key = book_name if book_name else narrative_id
+        
+        if cache_key in self.narrative_cache:
+            logger.info(f"✅ [1/5] Using cached chunks for '{cache_key}' - SKIPPING re-ingestion!")
+            chunks = self.narrative_cache[cache_key]
+        else:
+            step_start = time.time()
+            logger.info(f"🔄 [1/5] First time ingesting '{cache_key}' into vector store...")
+            chunking_strategy = self.config.get('pathway', {}).get('chunking', {}).get('strategy', 'semantic')
+            chunks = self.vector_store.ingest_narrative(narrative_text, narrative_id, strategy=chunking_strategy)
+            self.narrative_cache[cache_key] = chunks
+            logger.info(f"✅ [1/5] Completed in {time.time() - step_start:.1f}s - Created {len(chunks)} chunks (cached for future use)")
         
         # Step 2: Extract key queries from backstory
         step_start = time.time()
@@ -368,14 +379,27 @@ REASONING: [Brief explanation]"""
                 result = self.process_single_example(
                     narrative_text=example['narrative'],
                     backstory=example['backstory'],
-                    narrative_id=example['id']
+                    narrative_id=example['id'],
+                    book_name=example.get('book_name')  # Pass book name for caching
                 )
+                
+                prediction_label = "CONSISTENT" if result['decision'] == 1 else "INCONSISTENT"
+                true_label = example.get('true_label', 'N/A')
                 
                 results.append({
                     'Story ID': example['id'],
                     'Prediction': result['decision'],
                     'Rationale': result['reasoning'][:200]  # Limit rationale length
                 })
+                
+                # Print result immediately
+                logger.info("=" * 80)
+                logger.info(f"📊 RESULT #{idx+1}/{len(examples)} - Story ID: {example['id']}")
+                logger.info(f"   Prediction: {prediction_label} ({result['decision']})")
+                logger.info(f"   True Label: {true_label}")
+                logger.info(f"   Confidence: {result['confidence']:.2%}")
+                logger.info(f"   Rationale: {result['reasoning'][:150]}...")
+                logger.info("=" * 80)
                 
                 # Calculate and display time estimates
                 elapsed = time.time() - start_time

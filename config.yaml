@@ -2,13 +2,13 @@
 
 # Primary LLM Provider
 # Options: groq, ollama, anthropic, openai, google, together, cerebras
-# RECOMMENDED: cerebras for MAXIMUM SPEED (1800 tokens/sec) - Track A optimized
-llm_provider: "cerebras"
+# Using Groq for FREE and fast inference
+llm_provider: "groq"
 
 # Provider Configurations
 providers:
   groq:
-    model: "llama-3.3-70b-versatile"
+    model: "llama3-8b-8192"
     temperature: 0.1
     max_tokens: 4096
     cost_per_million_tokens: 0 # FREE but has rate limits
@@ -45,10 +45,10 @@ providers:
     cost_per_million_tokens: 10000 # $10 per million input tokens
 
   google:
-    model: "gemini-1.5-pro"
+    model: "gemini-1.5-flash"
     temperature: 0.1
     max_output_tokens: 8192
-    cost_per_million_tokens: 1250 # $1.25 per million input tokens
+    cost_per_million_tokens: 0 # Free tier available
 
 # Embeddings Configuration
 embeddings:
@@ -69,15 +69,15 @@ pathway:
     dimension: 1024 # BGE-large dimension
     collection_name: "narrative_chunks"
   chunking:
-    strategy: "hybrid" # hybrid combines semantic + fixed for best results
-    chunk_size: 700 # Optimized for speed while maintaining quality
-    chunk_overlap: 100 # Minimal overlap for faster processing
-    min_chunk_size: 300 # Lower threshold for better granularity
+    strategy: "fixed" # Fixed is fastest
+    chunk_size: 1200 # Larger chunks = fewer chunks = faster
+    chunk_overlap: 50 # Minimal overlap for speed
+    min_chunk_size: 400 # Larger minimum
 
 # Self-Consistency Configuration
 self_consistency:
   enabled: true
-  num_chains: 3 # Minimal chains for maximum speed (parallel processing maintains quality)
+  num_chains: 1 # Single chain for maximum speed
   voting_strategy: "majority" # Majority voting is faster than weighted
   confidence_threshold: 0.6
 
@@ -96,7 +96,7 @@ ensemble:
 
 # Multi-Agent Configuration
 multi_agent:
-  enabled: true
+  enabled: false
   agents:
     prosecutor:
       role: "Find evidence AGAINST consistency"
@@ -114,9 +114,9 @@ multi_agent:
 
 # Evidence Extraction (Pathway-based hybrid search)
 evidence:
-  max_passages: 20 # Reduced for faster processing
-  min_relevance_score: 0.6 # Higher threshold = fewer passages to process
-  context_window: 400 # Slightly smaller window for speed
+  max_passages: 10 # Minimal passages for maximum speed
+  min_relevance_score: 0.65 # Higher threshold = fewer passages
+  context_window: 300 # Smaller window for speed
 
 # Output Configuration
 output:
