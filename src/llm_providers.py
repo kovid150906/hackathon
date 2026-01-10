@@ -53,11 +53,11 @@ class GroqProvider(LLMProvider):
         return self.generate_with_system("You are a helpful assistant.", prompt, **kwargs)
     
     def generate_with_system(self, system: str, user: str, **kwargs) -> str:
-        """Generate text with system and user messages with rate limit retry."""
+        """Generate text with system and user messages with rate limit fallback."""
         import time
         temperature = kwargs.get('temperature', self.temperature)
         max_tokens = kwargs.get('max_tokens', self.max_tokens)
-        max_retries = kwargs.get('max_retries', 3)
+        max_retries = 1  # Only retry once to save time
         
         for attempt in range(max_retries):
             try:
@@ -75,11 +75,9 @@ class GroqProvider(LLMProvider):
                 error_str = str(e)
                 # Check if it's a rate limit error
                 if '429' in error_str or 'rate_limit' in error_str.lower():
-                    if attempt < max_retries - 1:
-                        wait_time = 60 * (attempt + 1)  # 60s, 120s, 180s
-                        logger.warning(f"Rate limit hit. Waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
-                        time.sleep(wait_time)
-                        continue
+                    logger.error(f"Groq rate limit exceeded. Please wait or switch to Ollama.")
+                    logger.error(f"To use Ollama: python main.py --provider ollama --dataset train.csv")
+                    raise Exception("RATE_LIMIT: Switch to Ollama (free, unlimited) or wait 1 hour")
                 logger.error(f"Groq API error: {e}")
                 raise
 
@@ -90,11 +88,18 @@ class OllamaProvider(LLMProvider):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.base_url = config.get('base_url', 'http://localhost:11434')
-        self.num_ctx = config.get('num_ctx', 8192)
+        # Large context windows can require multiple GiB of KV cache.
+        # Default to a conservative value for low-RAM machines.
+        self.num_ctx = config.get('num_ctx', 2048)
         
         try:
             import ollama
             self._client = ollama.Client(host=self.base_url)
+            # Ensure model is taken from provider config or env override
+            env_model = os.getenv('OLLAMA_MODEL')
+            if env_model:
+                self.model = env_model
+
             logger.info(f"Initialized Ollama provider with model: {self.model}")
         except ImportError:
             raise ImportError("ollama package not installed. Run: pip install ollama")
@@ -106,23 +111,42 @@ class OllamaProvider(LLMProvider):
     def generate_with_system(self, system: str, user: str, **kwargs) -> str:
         """Generate text with system and user messages."""
         temperature = kwargs.get('temperature', self.temperature)
-        
-        try:
-            response = self._client.chat(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user}
-                ],
-                options={
-                    "temperature": temperature,
-                    "num_ctx": self.num_ctx
-                }
-            )
-            return response['message']['content']
-        except Exception as e:
-            logger.error(f"Ollama API error: {e}")
-            raise
+
+        # If Ollama reports an out-of-memory error, retry with smaller context.
+        candidate_ctx_values = [self.num_ctx, 2048, 1536, 1024]
+        seen = set()
+        for ctx in candidate_ctx_values:
+            if ctx in seen:
+                continue
+            seen.add(ctx)
+
+            try:
+                logger.info(f"Calling Ollama chat with model: {self.model} (num_ctx={ctx})")
+                response = self._client.chat(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user}
+                    ],
+                    options={
+                        "temperature": temperature,
+                        "num_ctx": ctx
+                    }
+                )
+                # Persist the last successful context so future calls use it.
+                self.num_ctx = ctx
+                return response['message']['content']
+            except Exception as e:
+                error_str = str(e).lower()
+                if 'requires more system memory' in error_str or 'out of memory' in error_str:
+                    logger.warning(f"Ollama OOM at num_ctx={ctx}; trying smaller context")
+                    last_error = e
+                    continue
+                logger.error(f"Ollama API error: {e}")
+                raise
+
+        logger.error(f"Ollama API error after context retries: {last_error}")
+        raise last_error
 
 
 class AnthropicProvider(LLMProvider):

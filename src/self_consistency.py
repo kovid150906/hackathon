@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Tuple
 from collections import Counter
 from loguru import logger
 import json
+import re
 from src.llm_providers import LLMProvider
 
 
@@ -321,29 +322,32 @@ REASONING: [Comparison of scenarios]"""
         
         for line in lines:
             line = line.strip()
-            
-            if line.startswith('DECISION:'):
-                decision_text = line.replace('DECISION:', '').strip().upper()
-                if 'CONSISTENT' in decision_text and 'INCONSISTENT' not in decision_text:
-                    decision = 1
-                elif 'INCONSISTENT' in decision_text:
+            line_upper = line.upper()
+
+            if line_upper.startswith('DECISION:'):
+                decision_text = line.split(':', 1)[1].strip().lower()
+                if any(t in decision_text for t in ['inconsistent', 'inconistent', 'inconsistant', 'contradict']):
                     decision = 0
-            
-            elif line.startswith('CONFIDENCE:'):
+                elif 'consistent' in decision_text:
+                    decision = 1
+
+            elif line_upper.startswith('CONFIDENCE:'):
                 try:
-                    conf_text = line.replace('CONFIDENCE:', '').strip()
-                    confidence = float(conf_text)
-                    confidence = max(0.0, min(1.0, confidence))
-                except:
+                    conf_text = line.split(':', 1)[1].strip()
+                    m = re.search(r"([0-9]*\.?[0-9]+)", conf_text)
+                    if m:
+                        confidence = float(m.group(1))
+                        confidence = max(0.0, min(1.0, confidence))
+                except Exception:
                     confidence = 0.5
-            
-            elif line.startswith('REASONING:'):
-                reasoning = line.replace('REASONING:', '').strip()
+
+            elif line_upper.startswith('REASONING:'):
+                reasoning = line.split(':', 1)[1].strip()
         
         # If decision wasn't found, try to infer from reasoning
         if decision is None:
             response_lower = response.lower()
-            if 'inconsistent' in response_lower and 'consistent' not in response_lower:
+            if any(t in response_lower for t in ['inconsistent', 'inconistent', 'inconsistant', 'contradict']):
                 decision = 0
             elif 'consistent' in response_lower:
                 decision = 1
@@ -352,15 +356,17 @@ REASONING: [Comparison of scenarios]"""
         
         # Collect all reasoning text
         if not reasoning:
-            reasoning_started = False
-            reasoning_lines = []
+            # Strip DECISION/CONFIDENCE lines if the model didn't follow the format
+            filtered = []
             for line in lines:
-                if line.startswith('REASONING:'):
-                    reasoning_started = True
-                    reasoning_lines.append(line.replace('REASONING:', '').strip())
-                elif reasoning_started:
-                    reasoning_lines.append(line)
-            reasoning = ' '.join(reasoning_lines).strip()
+                u = line.strip().upper()
+                if u.startswith('DECISION:') or u.startswith('CONFIDENCE:'):
+                    continue
+                if u.startswith('REASONING:'):
+                    filtered.append(line.split(':', 1)[1].strip())
+                else:
+                    filtered.append(line.strip())
+            reasoning = ' '.join([x for x in filtered if x]).strip()
         
         return {
             'decision': decision,

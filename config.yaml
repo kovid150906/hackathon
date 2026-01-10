@@ -2,23 +2,21 @@
 
 # Primary LLM Provider
 # Options: groq, ollama, anthropic, openai, google
-llm_provider: "groq"
+llm_provider: "groq" # Primary provider (fast). Use --provider ollama if rate-limited.
 
 # Provider Configurations
 providers:
   groq:
-    model: "llama-3.3-70b-versatile"
+    model: "llama-3.1-8b-instant" # Smaller, faster, 25x fewer tokens
     temperature: 0.1
-    max_tokens: 2048  # Reduced to save tokens
+    max_tokens: 512 # Reduced for speed/cost
     cost_per_million_tokens: 0 # FREE
-    rate_limit_retry: true
-    retry_delay: 60  # seconds
 
   ollama:
     base_url: "http://localhost:11434"
-    model: "llama3.1:70b"
+    model: "phi3:mini" # Only needs ~2GB RAM, better quality than llama3.2:1b
     temperature: 0.1
-    num_ctx: 8192
+    num_ctx: 2048 # Lower context to fit in ~3.6GiB RAM; 8192 can exceed 5GiB due to KV cache
     cost_per_million_tokens: 0 # FREE (local)
 
   anthropic:
@@ -43,7 +41,7 @@ providers:
 embeddings:
   model: "BAAI/bge-large-en-v1.5" # or "sentence-transformers/all-MiniLM-L6-v2"
   device: "cpu" # or "cuda" if GPU available
-  batch_size: 128  # Increased for faster processing
+  batch_size: 32 # Safer on ~3.6GiB RAM; large batches can cause WSL OOM-kill
 
 # Reranker Configuration
 reranker:
@@ -59,33 +57,31 @@ pathway:
     collection_name: "narrative_chunks"
   chunking:
     strategy: "semantic" # semantic, fixed, or hybrid
-    chunk_size: 2000  # Larger chunks = fewer total chunks
-    chunk_overlap: 300
-    min_chunk_size: 800  # Reduce number of small chunks
+    chunk_size: 3000 # Larger chunks = fewer total chunks
+    chunk_overlap: 200
+    min_chunk_size: 1200 # Reduce number of small chunks
 
 # Self-Consistency Configuration
 self_consistency:
   enabled: true
-  num_chains: 5  # Reduced from 10 to save tokens
-  voting_strategy: "weighted" # majority or weighted
+  num_chains: 2 # Faster; still gives basic self-consistency
+  voting_strategy: "weighted"
   confidence_threshold: 0.6
 
 # Ensemble Configuration
 ensemble:
-  enabled: true
+  enabled: false # Disabled for speed
   models:
     - provider: "groq"
-      model: "llama-3.3-70b-versatile"
+      model: "llama-3.1-8b-instant"
       weight: 1.0
-    - provider: "ollama"
-      model: "llama3.1:8b"
-      weight: 0.8
+    # Keep only Groq models here to ensure Groq-only operation
   voting_strategy: "weighted" # majority, weighted, or soft
   min_agreement: 0.6
 
 # Multi-Agent Configuration
 multi_agent:
-  enabled: true
+  enabled: false # Disabled for speed
   agents:
     prosecutor:
       role: "Find evidence AGAINST consistency"
@@ -99,11 +95,11 @@ multi_agent:
     judge:
       role: "Final decision based on all evidence"
       temperature: 0.0
-  deliberation_rounds: 1  # Reduced from 3 to save tokens
+  deliberation_rounds: 1 # Reduced from 3 to save tokens
 
 # Evidence Extraction
 evidence:
-  max_passages: 30
+  max_passages: 20
   min_relevance_score: 0.5
   context_window: 500 # Characters before/after match
 
@@ -119,3 +115,4 @@ performance:
   cache_embeddings: true
   parallel_processing: true
   max_workers: 4
+  cache_dir: ".cache"  # Persistent embedding cache

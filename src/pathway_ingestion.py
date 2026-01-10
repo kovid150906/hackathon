@@ -9,6 +9,9 @@ from typing import List, Dict, Any, Optional
 from loguru import logger
 import numpy as np
 from sentence_transformers import SentenceTransformer
+import hashlib
+import json
+import os
 
 
 class NarrativeChunker:
@@ -154,8 +157,14 @@ class PathwayVectorStore:
         """Initialize Pathway vector store."""
         self.config = config
         self.embedding_model_name = config.get('embeddings', {}).get('model', 'BAAI/bge-large-en-v1.5')
+        self.embedding_batch_size = config.get('embeddings', {}).get('batch_size', 128)
         self.dimension = config.get('pathway', {}).get('vector_store', {}).get('dimension', 1024)
         self.collection_name = config.get('pathway', {}).get('vector_store', {}).get('collection_name', 'narrative_chunks')
+
+        self._cache_embeddings = config.get('performance', {}).get('cache_embeddings', True)
+        self._cache_dir = Path(config.get('performance', {}).get('cache_dir', '.cache'))
+        # Cache ingested chunks per narrative to avoid re-chunking/re-embedding the same book
+        self._ingest_cache: Dict[str, Dict[str, Any]] = {}
         
         # Initialize embedding model
         self.embedder = SentenceTransformer(self.embedding_model_name)
@@ -180,6 +189,46 @@ class PathwayVectorStore:
             List of chunks with embeddings
         """
         logger.info(f"Ingesting narrative {narrative_id} with {len(narrative_text)} characters")
+
+        cache_key = f"{narrative_id}|{strategy}|{self.chunker.chunk_size}|{self.chunker.overlap}|{self.chunker.min_chunk_size}|{self.embedding_model_name}"
+        text_fingerprint = hashlib.sha256(narrative_text.encode('utf-8', errors='ignore')).hexdigest()
+
+        if self._cache_embeddings:
+            # 1) In-memory cache (fast path)
+            cached = self._ingest_cache.get(cache_key)
+            if cached and cached.get('fingerprint') == text_fingerprint:
+                logger.info(f"Using cached chunks+embeddings for narrative {narrative_id} (memory)")
+                return cached['chunks']
+
+            # 2) Disk cache (persists across runs)
+            try:
+                self._cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_id = hashlib.sha256(cache_key.encode('utf-8')).hexdigest()[:16]
+                meta_path = self._cache_dir / f"narrative_{cache_id}.meta.json"
+                chunks_path = self._cache_dir / f"narrative_{cache_id}.chunks.jsonl"
+                emb_path = self._cache_dir / f"narrative_{cache_id}.emb.npy"
+
+                if meta_path.exists() and chunks_path.exists() and emb_path.exists():
+                    with open(meta_path, 'r', encoding='utf-8') as f:
+                        meta = json.load(f)
+                    if meta.get('fingerprint') == text_fingerprint:
+                        embeddings = np.load(emb_path)
+                        chunks: List[Dict[str, Any]] = []
+                        with open(chunks_path, 'r', encoding='utf-8') as f:
+                            for line in f:
+                                if not line.strip():
+                                    continue
+                                chunk = json.loads(line)
+                                chunks.append(chunk)
+                        if len(chunks) == embeddings.shape[0]:
+                            for i, chunk in enumerate(chunks):
+                                chunk['embedding'] = embeddings[i]
+                                chunk['narrative_id'] = narrative_id
+                            logger.info(f"Using cached chunks+embeddings for narrative {narrative_id} (disk)")
+                            self._ingest_cache[cache_key] = {'fingerprint': text_fingerprint, 'chunks': chunks}
+                            return chunks
+            except Exception as e:
+                logger.warning(f"Disk cache load failed (will recompute): {e}")
         
         # Chunk the text
         chunks = self.chunker.chunk_text(narrative_text, strategy=strategy)
@@ -190,7 +239,7 @@ class PathwayVectorStore:
         logger.info(f"Generating embeddings for {len(chunks)} chunks (this may take a few minutes)...")
         embeddings = self.embedder.encode(
             chunk_texts,
-            batch_size=128,  # Larger batch for speed
+            batch_size=self.embedding_batch_size,
             show_progress_bar=True,
             convert_to_numpy=True,
             normalize_embeddings=True  # Normalize for better similarity
@@ -202,6 +251,46 @@ class PathwayVectorStore:
             chunk['narrative_id'] = narrative_id
         
         logger.info(f"✓ Generated embeddings for {len(chunks)} chunks")
+
+        if self._cache_embeddings:
+            self._ingest_cache[cache_key] = {
+                'fingerprint': text_fingerprint,
+                'chunks': chunks,
+            }
+
+            # Best-effort disk cache write (so reruns don't redo embeddings)
+            try:
+                self._cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_id = hashlib.sha256(cache_key.encode('utf-8')).hexdigest()[:16]
+                meta_path = self._cache_dir / f"narrative_{cache_id}.meta.json"
+                chunks_path = self._cache_dir / f"narrative_{cache_id}.chunks.jsonl"
+                emb_path = self._cache_dir / f"narrative_{cache_id}.emb.npy"
+
+                np.save(emb_path, embeddings.astype(np.float32, copy=False))
+                with open(chunks_path, 'w', encoding='utf-8') as f:
+                    for chunk in chunks:
+                        # Save chunk metadata + text, but not the embedding (stored separately)
+                        to_save = {k: v for k, v in chunk.items() if k != 'embedding'}
+                        f.write(json.dumps(to_save, ensure_ascii=False) + "\n")
+                with open(meta_path, 'w', encoding='utf-8') as f:
+                    json.dump(
+                        {
+                            'fingerprint': text_fingerprint,
+                            'narrative_id': narrative_id,
+                            'strategy': strategy,
+                            'chunk_size': self.chunker.chunk_size,
+                            'chunk_overlap': self.chunker.overlap,
+                            'min_chunk_size': self.chunker.min_chunk_size,
+                            'embedding_model': self.embedding_model_name,
+                            'num_chunks': len(chunks),
+                        },
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                logger.info(f"Saved narrative cache to {self._cache_dir}")
+            except Exception as e:
+                logger.warning(f"Disk cache write failed (continuing without): {e}")
         return chunks
     
     def retrieve(self, query: str, chunks: List[Dict[str, Any]], top_k: int = 20) -> List[Dict[str, Any]]:
