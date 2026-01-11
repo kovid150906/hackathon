@@ -405,7 +405,7 @@ REASONING: [Comparison of scenarios]"""
         if not valid_chains:
             logger.error("No valid reasoning chains!")
             return {
-                'decision': 1,
+                'decision': None,  # Signal failure instead of defaulting to CONSISTENT
                 'confidence': 0.0,
                 'reasoning': "All reasoning chains failed",
                 'chain_votes': {}

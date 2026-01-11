@@ -61,6 +61,8 @@ class Config:
         
         # Add API key from environment
         api_key_map = {
+            'huggingface': 'HUGGINGFACE_API_KEY',
+            'deepseek': 'DEEPSEEK_API_KEY',
             'groq': 'GROQ_API_KEY',
             'anthropic': 'ANTHROPIC_API_KEY',
             'openai': 'OPENAI_API_KEY',

@@ -6,6 +6,12 @@ from typing import List, Dict, Any, Optional
 import os
 from loguru import logger
 
+
+class RateLimitException(Exception):
+    """Raised when API rate limit is exceeded."""
+    pass
+
+
 class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
     
@@ -53,13 +59,13 @@ class GroqProvider(LLMProvider):
         return self.generate_with_system("You are a helpful assistant.", prompt, **kwargs)
     
     def generate_with_system(self, system: str, user: str, **kwargs) -> str:
-        """Generate text with system and user messages with rate limit fallback."""
+        """Generate text with system and user messages with rate limit handling."""
         import time
         temperature = kwargs.get('temperature', self.temperature)
         max_tokens = kwargs.get('max_tokens', self.max_tokens)
-        max_retries = 1  # Only retry once to save time
+        max_retries = 2  # Retry twice with backoff for transient limits
         
-        for attempt in range(max_retries):
+        for attempt in range(max_retries + 1):
             try:
                 response = self._client.chat.completions.create(
                     model=self.model,
@@ -72,12 +78,22 @@ class GroqProvider(LLMProvider):
                 )
                 return response.choices[0].message.content
             except Exception as e:
-                error_str = str(e)
+                error_str = str(e).lower()
                 # Check if it's a rate limit error
-                if '429' in error_str or 'rate_limit' in error_str.lower():
-                    logger.error(f"Groq rate limit exceeded. Please wait or switch to Ollama.")
-                    logger.error(f"To use Ollama: python main.py --provider ollama --dataset train.csv")
-                    raise Exception("RATE_LIMIT: Switch to Ollama (free, unlimited) or wait 1 hour")
+                is_rate_limit = ('429' in error_str or 'rate_limit' in error_str or 
+                               'rate limit' in error_str or 'too many requests' in error_str)
+                
+                if is_rate_limit:
+                    if attempt < max_retries:
+                        wait_time = 2 ** attempt  # 1s, 2s exponential backoff
+                        logger.warning(f"Groq rate limit hit, retrying in {wait_time}s (attempt {attempt+1}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        # Final attempt failed - raise clear exception
+                        logger.error(f"Groq rate limit exhausted. Automatic fallback to Ollama will be attempted.")
+                        raise RateLimitException("GROQ_RATE_LIMIT")
+                
                 logger.error(f"Groq API error: {e}")
                 raise
 
@@ -274,6 +290,132 @@ class GoogleProvider(LLMProvider):
         return self.generate(combined_prompt, **kwargs)
 
 
+class HuggingFaceProvider(LLMProvider):
+    """HuggingFace Inference API provider (FREE)."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        api_key = config.get('api_key') or os.getenv('HUGGINGFACE_API_KEY')
+        if not api_key:
+            raise ValueError("HuggingFace API key not found. Set HUGGINGFACE_API_KEY environment variable.")
+        
+        try:
+            from huggingface_hub import InferenceClient
+            self._client = InferenceClient(token=api_key)
+            logger.info(f"Initialized HuggingFace provider with model: {self.model}")
+        except ImportError:
+            raise ImportError("huggingface_hub package not installed. Run: pip install huggingface_hub")
+    
+    def generate(self, prompt: str, **kwargs) -> str:
+        """Generate text from prompt."""
+        return self.generate_with_system("You are a helpful assistant.", prompt, **kwargs)
+    
+    def generate_with_system(self, system: str, user: str, **kwargs) -> str:
+        """Generate text with system and user messages."""
+        temperature = kwargs.get('temperature', self.temperature)
+        max_tokens = kwargs.get('max_tokens', self.max_tokens)
+        
+        try:
+            # Combine system and user for models that don't support system messages
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ]
+            
+            response = self._client.chat_completion(
+                messages=messages,
+                model=self.model,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"HuggingFace API error: {e}")
+            raise
+
+
+class DeepseekProvider(LLMProvider):
+    """Deepseek API provider (FREE)."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        api_key = config.get('api_key') or os.getenv('DEEPSEEK_API_KEY')
+        if not api_key:
+            raise ValueError("Deepseek API key not found. Set DEEPSEEK_API_KEY environment variable.")
+        
+        try:
+            from openai import OpenAI
+            # Deepseek uses OpenAI-compatible API
+            self._client = OpenAI(
+                api_key=api_key,
+                base_url="https://api.deepseek.com"
+            )
+            logger.info(f"Initialized Deepseek provider with model: {self.model}")
+        except ImportError:
+            raise ImportError("openai package not installed. Run: pip install openai")
+    
+    def generate(self, prompt: str, **kwargs) -> str:
+        """Generate text from prompt."""
+        return self.generate_with_system("You are a helpful assistant.", prompt, **kwargs)
+    
+    def generate_with_system(self, system: str, user: str, **kwargs) -> str:
+        """Generate text with system and user messages."""
+        temperature = kwargs.get('temperature', self.temperature)
+        max_tokens = kwargs.get('max_tokens', self.max_tokens)
+        
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user}
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Deepseek API error: {e}")
+            raise
+
+
+class FallbackProvider(LLMProvider):
+    """Provider that automatically falls back to Ollama on rate limits."""
+    
+    def __init__(self, primary: LLMProvider, fallback: LLMProvider):
+        """Initialize with primary and fallback providers."""
+        super().__init__({})
+        self.primary = primary
+        self.fallback = fallback
+        self.model = getattr(primary, 'model', 'unknown')
+        self.rate_limited = False
+        logger.info("Initialized FallbackProvider with automatic Ollama fallback")
+    
+    def generate(self, prompt: str, **kwargs) -> str:
+        """Generate with automatic fallback."""
+        if self.rate_limited:
+            return self.fallback.generate(prompt, **kwargs)
+        
+        try:
+            return self.primary.generate(prompt, **kwargs)
+        except RateLimitException:
+            logger.warning("Rate limit hit - switching to Ollama for remaining requests")
+            self.rate_limited = True
+            return self.fallback.generate(prompt, **kwargs)
+    
+    def generate_with_system(self, system: str, user: str, **kwargs) -> str:
+        """Generate with system prompt and automatic fallback."""
+        if self.rate_limited:
+            return self.fallback.generate_with_system(system, user, **kwargs)
+        
+        try:
+            return self.primary.generate_with_system(system, user, **kwargs)
+        except RateLimitException:
+            logger.warning("Rate limit hit - switching to Ollama for remaining requests")
+            self.rate_limited = True
+            return self.fallback.generate_with_system(system, user, **kwargs)
+
+
 def create_llm_provider(provider_name: str, config: Dict[str, Any]) -> LLMProvider:
     """Factory function to create LLM provider."""
     providers = {
@@ -281,7 +423,9 @@ def create_llm_provider(provider_name: str, config: Dict[str, Any]) -> LLMProvid
         'ollama': OllamaProvider,
         'anthropic': AnthropicProvider,
         'openai': OpenAIProvider,
-        'google': GoogleProvider
+        'google': GoogleProvider,
+        'deepseek': DeepseekProvider,
+        'huggingface': HuggingFaceProvider
     }
     
     provider_class = providers.get(provider_name.lower())

@@ -36,12 +36,27 @@ class NarrativeConsistencyChecker:
         logger.info("NarrativeConsistencyChecker initialized successfully")
     
     def _init_llm(self):
-        """Initialize primary LLM provider."""
+        """Initialize primary LLM provider with fallback."""
+        from src.llm_providers import FallbackProvider
+        
         provider_name = self.config.primary_provider
         provider_config = self.config.get_provider_config(provider_name)
         
-        self.primary_llm = create_llm_provider(provider_name, provider_config)
-        logger.info(f"Initialized primary LLM: {provider_name}")
+        primary = create_llm_provider(provider_name, provider_config)
+        
+        # Add automatic Ollama fallback for API providers to handle rate limits gracefully
+        if provider_name.lower() in ['groq', 'deepseek', 'huggingface']:
+            try:
+                ollama_config = self.config.get_provider_config('ollama')
+                fallback = create_llm_provider('ollama', ollama_config)
+                self.primary_llm = FallbackProvider(primary=primary, fallback=fallback)
+                logger.info(f"Initialized {provider_name} with Ollama fallback (automatic rate-limit handling)")
+            except Exception as e:
+                logger.warning(f"Could not initialize Ollama fallback: {e}. Using {provider_name} only.")
+                self.primary_llm = primary
+        else:
+            self.primary_llm = primary
+            logger.info(f"Initialized primary LLM: {provider_name}")
     
     def _init_vector_store(self):
         """Initialize Pathway vector store."""
@@ -157,13 +172,18 @@ class NarrativeConsistencyChecker:
                 evidence
             )
             sc_result = self.self_consistency.aggregate_chains(chains)
-            predictions.append({
-                'decision': sc_result['decision'],
-                'confidence': sc_result['confidence'],
-                'reasoning': sc_result['reasoning'],
-                'weight': 1.5,  # Higher weight for self-consistency
-                'method': 'self_consistency'
-            })
+            
+            # Only use result if we got a valid decision
+            if sc_result.get('decision') is not None:
+                predictions.append({
+                    'decision': sc_result['decision'],
+                    'confidence': sc_result['confidence'],
+                    'reasoning': sc_result['reasoning'],
+                    'weight': 1.5,  # Higher weight for self-consistency
+                    'method': 'self_consistency'
+                })
+            else:
+                logger.warning("Self-consistency failed to produce valid decision, skipping")
         
         # Multi-agent
         if self.multi_agent:

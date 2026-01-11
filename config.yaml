@@ -1,11 +1,23 @@
 # Configuration for Narrative Consistency Checker
 
 # Primary LLM Provider
-# Options: groq, ollama, anthropic, openai, google
-llm_provider: "groq" # Use Groq API for much faster inference; keep Ollama as fallback
+# Options: huggingface, deepseek, groq, ollama, anthropic, openai, google
+llm_provider: "huggingface" # HuggingFace: FREE, many models, generous limits
 
 # Provider Configurations
 providers:
+  huggingface:
+    model: "meta-llama/Meta-Llama-3-8B-Instruct" # Free, good reasoning
+    temperature: 0.1
+    max_tokens: 300
+    cost_per_million_tokens: 0 # FREE
+
+  deepseek:
+    model: "deepseek-chat" # Free, excellent reasoning model
+    temperature: 0.1
+    max_tokens: 300
+    cost_per_million_tokens: 0 # FREE (generous limits)
+
   groq:
     model: "llama-3.1-8b-instant" # Smaller, faster, 25x fewer tokens
     temperature: 0.1
@@ -65,7 +77,7 @@ pathway:
 # Self-Consistency Configuration
 self_consistency:
   enabled: true
-  num_chains: 3 # Groq is fast; 3 chains improves accuracy
+  num_chains: 2 # Reduced to 2 for better API quota management; early_stop helps
   voting_strategy: "weighted"
   confidence_threshold: 0.6
   early_stop_confidence: 0.85 # Stop extra chains when very confident
