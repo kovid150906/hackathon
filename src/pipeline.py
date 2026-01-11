@@ -64,10 +64,15 @@ class NarrativeConsistencyChecker:
         # Self-consistency engine
         sc_config = self.config.get_self_consistency_config()
         if sc_config.get('enabled', True):
+            evidence_cfg = self.config.get_evidence_config()
+            max_evidence_passages = int(evidence_cfg.get('llm_passages', evidence_cfg.get('max_passages', 15)))
+            early_stop_conf = float(sc_config.get('early_stop_confidence', 0.85))
             self.self_consistency = SelfConsistencyEngine(
                 self.primary_llm,
                 num_chains=sc_config.get('num_chains', 10),
-                voting_strategy=sc_config.get('voting_strategy', 'weighted')
+                voting_strategy=sc_config.get('voting_strategy', 'weighted'),
+                max_evidence_passages=max_evidence_passages,
+                early_stop_confidence=early_stop_conf,
             )
             logger.info("Initialized self-consistency engine")
         else:
@@ -117,6 +122,10 @@ class NarrativeConsistencyChecker:
         # Step 2: Extract key queries from backstory
         logger.info("Step 2: Extracting key queries from backstory")
         queries = self._extract_queries_from_backstory(backstory)
+
+        # Use extracted queries as high-signal claims for reasoning (token efficient)
+        claims_text = "\n".join(f"- {q}" for q in queries[:3])
+        backstory_for_llm = f"KEY CLAIMS:\n{claims_text}\n\nBACKSTORY:\n{backstory}"
         
         # Step 3: Retrieve relevant evidence
         logger.info("Step 3: Retrieving relevant evidence")
@@ -126,6 +135,14 @@ class NarrativeConsistencyChecker:
         if self.reranker:
             logger.info("Step 4: Reranking evidence")
             evidence = self._rerank_evidence(backstory, evidence)
+
+        # Token optimization: truncate evidence text before sending to LLM
+        evidence_cfg = self.config.get_evidence_config()
+        context_window = int(evidence_cfg.get('context_window', 500))
+        for ev in evidence:
+            text = ev.get('text', '')
+            if isinstance(text, str) and len(text) > context_window:
+                ev['text'] = text[:context_window]
         
         # Step 5: Run reasoning engines
         logger.info("Step 5: Running reasoning engines")
@@ -136,7 +153,7 @@ class NarrativeConsistencyChecker:
             logger.info("Running self-consistency reasoning")
             chains = self.self_consistency.generate_reasoning_chains(
                 narrative_text[:5000],  # Use first 5k chars as summary
-                backstory,
+                backstory_for_llm,
                 evidence
             )
             sc_result = self.self_consistency.aggregate_chains(chains)
@@ -213,27 +230,20 @@ class NarrativeConsistencyChecker:
     
     def _extract_queries_from_backstory(self, backstory: str) -> List[str]:
         """Extract key queries from backstory for evidence retrieval."""
-        # Use LLM to extract key claims
-        prompt = f"""Extract 5-10 key factual claims from this backstory that should be verified against the narrative.
-Focus on claims about:
-1. Character attributes (name, age, appearance, personality)
-2. Past events and experiences
-3. Relationships with other characters
-4. Beliefs, motivations, fears
-5. Skills or abilities
-
-BACKSTORY:
-{backstory}
-
-Output each claim as a short query (one per line):"""
+        # Token-optimized: get a few short retrieval queries (saves time and tokens)
+        prompt = (
+            "Extract up to 3 short search queries (max 8 words each) that would help verify this backstory. "
+            "One query per line. No numbering, no extra text.\n\n"
+            f"BACKSTORY:\n{backstory[:700]}"
+        )
 
         try:
-            response = self.primary_llm.generate(prompt, temperature=0.0)
-            queries = [line.strip() for line in response.split('\n') if line.strip() and not line.strip().startswith('#')]
-            
-            # Add the full backstory as a query too
-            queries.append(backstory)
-            
+            response = self.primary_llm.generate(prompt, temperature=0.0, max_tokens=80)
+            raw_lines = [line.strip() for line in (response or "").split('\n')]
+            queries = [ln for ln in raw_lines if ln and not ln.startswith('#')]
+            queries = queries[:3]
+            if not queries:
+                return [backstory]
             logger.info(f"Extracted {len(queries)} queries from backstory")
             return queries
         except Exception as e:
@@ -244,13 +254,23 @@ Output each claim as a short query (one per line):"""
         """Retrieve relevant evidence for all queries."""
         evidence_config = self.config.get_evidence_config()
         max_passages = evidence_config.get('max_passages', 30)
+
+        # If reranker is enabled, retrieve more candidates first, then rerank down.
+        reranker_config = self.config.get_reranker_config()
+        if self.reranker:
+            candidate_k = int(reranker_config.get('top_k', 50))
+        else:
+            candidate_k = int(max_passages)
+
+        num_queries = max(1, len(queries))
+        per_query_top_k = max(10, min(25, (candidate_k + num_queries - 1) // num_queries))
         
         all_evidence = []
         seen_chunks = set()
         
         for query in queries:
             # Hybrid search for each query
-            results = self.vector_store.hybrid_search(query, chunks, top_k=10)
+            results = self.vector_store.hybrid_search(query, chunks, top_k=per_query_top_k)
             
             for result in results:
                 chunk_id = result['chunk_id']
@@ -260,7 +280,7 @@ Output each claim as a short query (one per line):"""
         
         # Sort by score and take top passages
         all_evidence.sort(key=lambda x: x.get('score', 0.0), reverse=True)
-        all_evidence = all_evidence[:max_passages]
+        all_evidence = all_evidence[:candidate_k]
         
         logger.info(f"Retrieved {len(all_evidence)} unique evidence passages")
         return all_evidence

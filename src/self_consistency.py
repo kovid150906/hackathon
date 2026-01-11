@@ -1,7 +1,7 @@
 """
 Self-consistency reasoning engine with multiple independent chains.
 """
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from collections import Counter
 from loguru import logger
 import json
@@ -12,7 +12,14 @@ from src.llm_providers import LLMProvider
 class SelfConsistencyEngine:
     """Self-consistency reasoning with multiple independent chains."""
     
-    def __init__(self, llm_provider: LLMProvider, num_chains: int = 10, voting_strategy: str = "weighted"):
+    def __init__(
+        self,
+        llm_provider: LLMProvider,
+        num_chains: int = 10,
+        voting_strategy: str = "weighted",
+        max_evidence_passages: int = 15,
+        early_stop_confidence: float = 0.85,
+    ):
         """
         Initialize self-consistency engine.
         
@@ -24,6 +31,8 @@ class SelfConsistencyEngine:
         self.llm = llm_provider
         self.num_chains = num_chains
         self.voting_strategy = voting_strategy
+        self.max_evidence_passages = max_evidence_passages
+        self.early_stop_confidence = early_stop_confidence
         logger.info(f"Initialized SelfConsistencyEngine with {num_chains} chains, strategy: {voting_strategy}")
     
     def generate_reasoning_chains(self, narrative: str, backstory: str, evidence: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -47,7 +56,10 @@ class SelfConsistencyEngine:
             try:
                 # Extract content string from prompt dict
                 prompt_text = prompt['content'] if isinstance(prompt, dict) else prompt
-                response = self.llm.generate(prompt_text, temperature=0.2)
+                temperature = 0.1
+                if isinstance(prompt, dict) and 'temperature' in prompt:
+                    temperature = prompt['temperature']
+                response = self.llm.generate(prompt_text, temperature=temperature)
                 parsed = self._parse_response(response)
                 chains.append({
                     'chain_id': i,
@@ -57,6 +69,16 @@ class SelfConsistencyEngine:
                     'reasoning': parsed['reasoning'],
                     'raw_response': response
                 })
+
+                # Efficiency win without accuracy loss: early-stop only on very high confidence.
+                if (
+                    parsed.get('decision') is not None
+                    and float(parsed.get('confidence') or 0.0) >= self.early_stop_confidence
+                ):
+                    logger.info(
+                        f"Early-stopping self-consistency at chain {i+1} (confidence={parsed['confidence']:.2f})"
+                    )
+                    break
             except Exception as e:
                 logger.error(f"Error in chain {i}: {e}")
                 chains.append({
@@ -74,7 +96,8 @@ class SelfConsistencyEngine:
         """Create diverse prompts for different reasoning approaches."""
         
         # Format evidence
-        evidence_text = self._format_evidence(evidence)
+        evidence_text = self._format_evidence(evidence, max_passages=self.max_evidence_passages)
+        backstory_short = backstory[:1200]
         
         prompts = [
             # Direct analysis
@@ -83,21 +106,36 @@ class SelfConsistencyEngine:
                 'content': f"""You are analyzing whether a character's backstory is consistent with a narrative.
 
 BACKSTORY:
-{backstory}
+{backstory_short}
 
 EVIDENCE FROM NARRATIVE:
 {evidence_text}
 
-Analyze whether the backstory is logically consistent with the narrative. Consider:
-1. Direct contradictions (events, facts, character attributes)
-2. Causal inconsistencies (backstory prevents later events)
-3. Character psychology mismatches
-4. Timeline conflicts
+Decide if there is any clear contradiction between BACKSTORY and EVIDENCE.
 
 Respond in this format:
 DECISION: [CONSISTENT or INCONSISTENT]
 CONFIDENCE: [0.0 to 1.0]
-REASONING: [Brief explanation of key evidence supporting your decision]"""
+REASONING: [1-3 sentences, cite passages]"""
+            },
+
+            # Contradiction search (high-signal)
+            {
+                'type': 'contradiction',
+                'content': f"""Find ANY explicit contradiction between backstory and evidence.
+
+BACKSTORY:
+{backstory_short}
+
+EVIDENCE:
+{evidence_text}
+
+If you find even ONE clear contradiction (names/places/roles/timeline/events) → INCONSISTENT.
+If no contradictions found → CONSISTENT.
+
+DECISION: [CONSISTENT or INCONSISTENT]
+CONFIDENCE: [0.0 to 1.0]
+REASONING: [List contradictions or say none found]"""
             },
             
             # Timeline reconstruction
@@ -106,7 +144,7 @@ REASONING: [Brief explanation of key evidence supporting your decision]"""
                 'content': f"""You are a detective reconstructing a timeline to verify a character's backstory.
 
 PROPOSED BACKSTORY:
-{backstory}
+{backstory_short}
 
 EVIDENCE FROM NARRATIVE:
 {evidence_text}
@@ -128,7 +166,7 @@ REASONING: [Key timeline conflicts or confirmations]"""
                 'content': f"""You are a psychologist analyzing character consistency.
 
 CHARACTER BACKSTORY:
-{backstory}
+{backstory_short}
 
 EVIDENCE FROM NARRATIVE:
 {evidence_text}
@@ -150,7 +188,7 @@ REASONING: [Key psychological consistencies or conflicts]"""
                 'content': f"""You are analyzing causal relationships between backstory and narrative.
 
 BACKSTORY:
-{backstory}
+{backstory_short}
 
 NARRATIVE EVIDENCE:
 {evidence_text}
@@ -166,38 +204,13 @@ CONFIDENCE: [0.0 to 1.0]
 REASONING: [Key causal chains that support or contradict]"""
             },
             
-            # Contradiction search
-            {
-                'type': 'contradiction',
-                'content': f"""You are specifically searching for contradictions between backstory and narrative.
-
-BACKSTORY CLAIMS:
-{backstory}
-
-NARRATIVE EVIDENCE:
-{evidence_text}
-
-Your task: Find ANY contradictions between backstory claims and narrative facts. Look for:
-1. Explicit factual conflicts
-2. Impossible implications
-3. Character attribute mismatches
-4. World-building inconsistencies
-
-If you find even one clear contradiction, the backstory is INCONSISTENT.
-
-Respond in this format:
-DECISION: [CONSISTENT or INCONSISTENT]
-CONFIDENCE: [0.0 to 1.0]
-REASONING: [List contradictions found, or confirm none found]"""
-            },
-            
             # Socratic questioning
             {
                 'type': 'socratic',
                 'content': f"""Use Socratic method to question the backstory's consistency.
 
 BACKSTORY:
-{backstory}
+{backstory_short}
 
 NARRATIVE EVIDENCE:
 {evidence_text}
@@ -220,7 +233,7 @@ REASONING: [Key questions and their answers]"""
                 'content': f"""Play devil's advocate: Assume the backstory is INCONSISTENT and find evidence to support this.
 
 BACKSTORY:
-{backstory}
+{backstory_short}
 
 NARRATIVE EVIDENCE:
 {evidence_text}
@@ -240,7 +253,7 @@ REASONING: [Your best arguments and final assessment]"""
                 'content': f"""Play devil's advocate: Assume the backstory IS CONSISTENT and find evidence to support this.
 
 BACKSTORY:
-{backstory}
+{backstory_short}
 
 NARRATIVE EVIDENCE:
 {evidence_text}
@@ -260,7 +273,7 @@ REASONING: [Your best arguments and final assessment]"""
                 'content': f"""Analyze step-by-step with formal logic.
 
 BACKSTORY:
-{backstory}
+{backstory_short}
 
 NARRATIVE EVIDENCE:
 {evidence_text}
@@ -282,7 +295,7 @@ REASONING: [Your step-by-step analysis]"""
                 'content': f"""Use counterfactual reasoning to test consistency.
 
 BACKSTORY:
-{backstory}
+{backstory_short}
 
 NARRATIVE EVIDENCE:
 {evidence_text}
@@ -302,13 +315,15 @@ REASONING: [Comparison of scenarios]"""
         
         return prompts
     
-    def _format_evidence(self, evidence: List[Dict[str, Any]], max_passages: int = 15) -> str:
+    def _format_evidence(self, evidence: List[Dict[str, Any]], max_passages: Optional[int] = None) -> str:
         """Format evidence passages for prompts."""
+        if max_passages is None:
+            max_passages = len(evidence)
+
         formatted = []
         for i, ev in enumerate(evidence[:max_passages], 1):
             text = ev.get('text', '')
-            score = ev.get('rerank_score', ev.get('score', 0.0))
-            formatted.append(f"[Passage {i}] (relevance: {score:.3f})\n{text}\n")
+            formatted.append(f"[Passage {i}]\n{text}\n")
         
         return "\n".join(formatted)
     

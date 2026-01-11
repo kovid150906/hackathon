@@ -165,6 +165,8 @@ class PathwayVectorStore:
         self._cache_dir = Path(config.get('performance', {}).get('cache_dir', '.cache'))
         # Cache ingested chunks per narrative to avoid re-chunking/re-embedding the same book
         self._ingest_cache: Dict[str, Dict[str, Any]] = {}
+        # Cache retrieval matrices keyed by the in-memory chunks list identity
+        self._retrieval_cache: Dict[int, Dict[str, Any]] = {}
         
         # Initialize embedding model
         self.embedder = SentenceTransformer(self.embedding_model_name)
@@ -305,17 +307,27 @@ class PathwayVectorStore:
         Returns:
             List of top-k most relevant chunks
         """
-        # Generate query embedding
-        query_embedding = self.embedder.encode([query], convert_to_numpy=True)[0]
-        
-        # Calculate similarity scores
-        scores = []
-        for chunk in chunks:
-            score = np.dot(query_embedding, chunk['embedding']) / (
-                np.linalg.norm(query_embedding) * np.linalg.norm(chunk['embedding'])
-            )
-            scores.append(score)
-        
+        # Generate query embedding (normalize for cosine similarity)
+        query_embedding = self.embedder.encode(
+            [query],
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )[0]
+
+        # Build (and cache) a dense matrix view of chunk embeddings for fast scoring.
+        cache_key = id(chunks)
+        cached = self._retrieval_cache.get(cache_key)
+        if not cached or cached.get('num_chunks') != len(chunks):
+            emb_matrix = np.vstack([c['embedding'] for c in chunks])
+            self._retrieval_cache[cache_key] = {
+                'num_chunks': len(chunks),
+                'emb_matrix': emb_matrix,
+            }
+            cached = self._retrieval_cache[cache_key]
+
+        emb_matrix = cached['emb_matrix']
+        scores = emb_matrix @ query_embedding
+
         # Get top-k indices
         top_indices = np.argsort(scores)[-top_k:][::-1]
         
@@ -325,8 +337,9 @@ class PathwayVectorStore:
             result = chunks[idx].copy()
             result['score'] = float(scores[idx])
             results.append(result)
-        
-        logger.info(f"Retrieved {len(results)} chunks for query (scores: {[f'{r['score']:.3f}' for r in results[:3]]})")
+
+        scores_preview = [f"{r['score']:.3f}" for r in results[:3]]
+        logger.info(f"Retrieved {len(results)} chunks for query (scores: {scores_preview})")
         return results
     
     def hybrid_search(self, query: str, chunks: List[Dict[str, Any]], top_k: int = 20, keyword_weight: float = 0.3) -> List[Dict[str, Any]]:

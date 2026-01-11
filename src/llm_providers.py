@@ -111,6 +111,7 @@ class OllamaProvider(LLMProvider):
     def generate_with_system(self, system: str, user: str, **kwargs) -> str:
         """Generate text with system and user messages."""
         temperature = kwargs.get('temperature', self.temperature)
+        max_tokens = kwargs.get('max_tokens', self.max_tokens)
 
         # If Ollama reports an out-of-memory error, retry with smaller context.
         candidate_ctx_values = [self.num_ctx, 2048, 1536, 1024]
@@ -130,7 +131,9 @@ class OllamaProvider(LLMProvider):
                     ],
                     options={
                         "temperature": temperature,
-                        "num_ctx": ctx
+                        "num_ctx": ctx,
+                        # Ollama uses num_predict as generation token limit.
+                        "num_predict": max_tokens,
                     }
                 )
                 # Persist the last successful context so future calls use it.
