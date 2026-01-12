@@ -36,7 +36,7 @@ class NarrativeConsistencyChecker:
         logger.info("NarrativeConsistencyChecker initialized successfully")
     
     def _init_llm(self):
-        """Initialize primary LLM provider with fallback."""
+        """Initialize primary LLM provider with triple fallback."""
         from src.llm_providers import FallbackProvider
         
         provider_name = self.config.primary_provider
@@ -44,13 +44,35 @@ class NarrativeConsistencyChecker:
         
         primary = create_llm_provider(provider_name, provider_config)
         
-        # Add automatic Ollama fallback for API providers to handle rate limits gracefully
-        if provider_name.lower() in ['groq', 'deepseek', 'huggingface']:
+        # Setup triple fallback: HuggingFace → Groq → Ollama (per-request)
+        if provider_name.lower() == 'huggingface':
+            try:
+                # Second: Groq
+                groq_config = self.config.get_provider_config('groq')
+                fallback = create_llm_provider('groq', groq_config)
+                
+                # Third: Ollama
+                try:
+                    ollama_config = self.config.get_provider_config('ollama')
+                    secondary_fallback = create_llm_provider('ollama', ollama_config)
+                    self.primary_llm = FallbackProvider(
+                        primary=primary, 
+                        fallback=fallback, 
+                        secondary_fallback=secondary_fallback
+                    )
+                    logger.info("✓ Triple fallback: HuggingFace → Groq → Ollama (per-request)")
+                except Exception as e:
+                    self.primary_llm = FallbackProvider(primary=primary, fallback=fallback)
+                    logger.info("✓ Double fallback: HuggingFace → Groq (per-request)")
+            except Exception as e:
+                logger.warning(f"Could not initialize fallback chain: {e}. Using HuggingFace only.")
+                self.primary_llm = primary
+        elif provider_name.lower() in ['groq', 'deepseek']:
             try:
                 ollama_config = self.config.get_provider_config('ollama')
                 fallback = create_llm_provider('ollama', ollama_config)
                 self.primary_llm = FallbackProvider(primary=primary, fallback=fallback)
-                logger.info(f"Initialized {provider_name} with Ollama fallback (automatic rate-limit handling)")
+                logger.info(f"✓ Double fallback: {provider_name} → Ollama (per-request)")
             except Exception as e:
                 logger.warning(f"Could not initialize Ollama fallback: {e}. Using {provider_name} only.")
                 self.primary_llm = primary

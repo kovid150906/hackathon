@@ -380,40 +380,87 @@ class DeepseekProvider(LLMProvider):
 
 
 class FallbackProvider(LLMProvider):
-    """Provider that automatically falls back to Ollama on rate limits."""
+    """Provider with triple fallback chain (per-request retry)."""
     
-    def __init__(self, primary: LLMProvider, fallback: LLMProvider):
-        """Initialize with primary and fallback providers."""
+    def __init__(self, primary: LLMProvider, fallback: LLMProvider, secondary_fallback: LLMProvider = None):
+        """Initialize with primary, fallback, and optional secondary fallback."""
         super().__init__({})
         self.primary = primary
         self.fallback = fallback
+        self.secondary_fallback = secondary_fallback
         self.model = getattr(primary, 'model', 'unknown')
-        self.rate_limited = False
-        logger.info("Initialized FallbackProvider with automatic Ollama fallback")
+        
+        if secondary_fallback:
+            logger.info("Initialized triple fallback chain (per-request): primary → fallback → secondary")
+        else:
+            logger.info("Initialized double fallback chain (per-request): primary → fallback")
+    
+    def _is_limit_error(self, e: Exception) -> bool:
+        """Check if exception is a rate limit or payment error."""
+        err = str(e).lower()
+        return ('429' in err or 'rate limit' in err or 'rate_limit' in err or
+                'payment required' in err or '402' in err or 'usage limit' in err or
+                'insufficient balance' in err)
     
     def generate(self, prompt: str, **kwargs) -> str:
-        """Generate with automatic fallback."""
-        if self.rate_limited:
-            return self.fallback.generate(prompt, **kwargs)
+        """Try primary → fallback → secondary for EACH request.
         
+        NO PERMANENT STATE - each new request tries primary first.
+        """
+        # 1. Try primary (HuggingFace)
         try:
-            return self.primary.generate(prompt, **kwargs)
-        except RateLimitException:
-            logger.warning("Rate limit hit - switching to Ollama for remaining requests")
-            self.rate_limited = True
-            return self.fallback.generate(prompt, **kwargs)
+            result = self.primary.generate(prompt, **kwargs)
+            logger.info("✓ Request succeeded with primary provider (HuggingFace)")
+            return result
+        except Exception as e:
+            if not self._is_limit_error(e):
+                raise
+            logger.warning(f"Primary provider (HuggingFace) failed: {type(e).__name__} - trying fallback (Groq)")
+        
+        # 2. Try fallback (Groq)
+        try:
+            result = self.fallback.generate(prompt, **kwargs)
+            logger.info("✓ Request succeeded with fallback provider (Groq)")
+            return result
+        except Exception as e:
+            if not self._is_limit_error(e) or not self.secondary_fallback:
+                raise
+            logger.warning(f"Fallback provider (Groq) failed: {type(e).__name__} - trying secondary (Ollama)")
+        
+        # 3. Try secondary fallback (Ollama - always succeeds)
+        result = self.secondary_fallback.generate(prompt, **kwargs)
+        logger.info("✓ Request succeeded with secondary fallback (Ollama)")
+        return result
     
     def generate_with_system(self, system: str, user: str, **kwargs) -> str:
-        """Generate with system prompt and automatic fallback."""
-        if self.rate_limited:
-            return self.fallback.generate_with_system(system, user, **kwargs)
+        """Try primary → fallback → secondary for EACH request.
         
+        NO PERMANENT STATE - each new request tries primary first.
+        """
+        # 1. Try primary (HuggingFace)
         try:
-            return self.primary.generate_with_system(system, user, **kwargs)
-        except RateLimitException:
-            logger.warning("Rate limit hit - switching to Ollama for remaining requests")
-            self.rate_limited = True
-            return self.fallback.generate_with_system(system, user, **kwargs)
+            result = self.primary.generate_with_system(system, user, **kwargs)
+            logger.info("✓ Request succeeded with primary provider (HuggingFace)")
+            return result
+        except Exception as e:
+            if not self._is_limit_error(e):
+                raise
+            logger.warning(f"Primary provider (HuggingFace) failed: {type(e).__name__} - trying fallback (Groq)")
+        
+        # 2. Try fallback (Groq)
+        try:
+            result = self.fallback.generate_with_system(system, user, **kwargs)
+            logger.info("✓ Request succeeded with fallback provider (Groq)")
+            return result
+        except Exception as e:
+            if not self._is_limit_error(e) or not self.secondary_fallback:
+                raise
+            logger.warning(f"Fallback provider (Groq) failed: {type(e).__name__} - trying secondary (Ollama)")
+        
+        # 3. Try secondary fallback (Ollama - always succeeds)
+        result = self.secondary_fallback.generate_with_system(system, user, **kwargs)
+        logger.info("✓ Request succeeded with secondary fallback (Ollama)")
+        return result
 
 
 def create_llm_provider(provider_name: str, config: Dict[str, Any]) -> LLMProvider:
