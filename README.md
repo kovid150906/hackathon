@@ -12,10 +12,11 @@
 This system determines whether a hypothetical character backstory is **consistent** or **inconsistent** with a complete narrative (100k+ words) by:
 
 1. **Pathway-based Vector Store**: Semantic chunking and hybrid retrieval
-2. **Self-Consistency Reasoning**: 10 independent reasoning chains with varied prompting strategies
-3. **Multi-Agent Adversarial System**: Prosecutor, Defender, Investigator, and Judge agents
-4. **Ensemble Voting**: Weighted aggregation of multiple reasoning methods
-5. **Flexible LLM Providers**: Support for Groq (FREE), Ollama (FREE), Claude, GPT-4, and Gemini
+2. **Self-Consistency Reasoning**: Multiple independent reasoning chains with varied prompting strategies
+3. **Multi-Agent Adversarial System** (optional): Prosecutor, Defender, Investigator, and Judge agents
+4. **Ensemble Voting** (optional): Weighted aggregation of multiple reasoning methods
+5. **Flexible LLM Providers**: HuggingFace (FREE - default), Groq (FREE), Ollama (FREE), DeepSeek (FREE), plus Claude, GPT-4, and Gemini
+6. **Smart Fallback Chain**: Automatic failover between providers (HuggingFace → Groq → Ollama) for maximum reliability
 
 ## 🏗️ Architecture
 
@@ -39,7 +40,7 @@ Input: Narrative (100k+ words) + Hypothetical Backstory
 ┌─────────────────────────────────────────────────────┐
 │ 3. Multi-Method Reasoning                           │
 │    ┌─────────────────────────────────────┐          │
-│    │ Self-Consistency (10 chains)        │          │
+│    │ Self-Consistency (2 chains default) │          │
 │    │ - Direct analysis                   │          │
 │    │ - Timeline reconstruction           │          │
 │    │ - Character psychology              │          │
@@ -49,13 +50,19 @@ Input: Narrative (100k+ words) + Hypothetical Backstory
 │    │ - Devil's advocate (both sides)     │          │
 │    │ - Step-by-step logic                │          │
 │    │ - Counterfactual reasoning          │          │
+│    │ - Early stopping when confident     │          │
 │    └─────────────────────────────────────┘          │
 │    ┌─────────────────────────────────────┐          │
-│    │ Multi-Agent System                  │          │
+│    │ Multi-Agent System (optional)       │          │
 │    │ - Prosecutor: Find inconsistencies  │          │
 │    │ - Defender: Find supporting evidence│          │
 │    │ - Investigator: Neutral fact-finding│          │
 │    │ - Judge: Final decision             │          │
+│    └─────────────────────────────────────┘          │
+│    ┌─────────────────────────────────────┐          │
+│    │ Smart Fallback (HF → Groq → Ollama)│          │
+│    │ - Automatic provider switching      │          │
+│    │ - Handles rate limits gracefully    │          │
 │    └─────────────────────────────────────┘          │
 └─────────────────────────────────────────────────────┘
     ↓
@@ -83,90 +90,305 @@ Output: Decision (0/1) + Confidence + Reasoning
 
 Pathway framework requires Linux. Use WSL (built into Windows 10/11):
 
-```powershell
-# 1. Check if WSL is installed
-wsl --version
+**Step 1: Install WSL**
 
-# 2. If not installed, install WSL
+```powershell
+# Open PowerShell as Administrator and run:
 wsl --install
 
-# 3. Start WSL Ubuntu
+# This installs Ubuntu by default. Restart your computer if prompted.
+```
+
+**Step 2: Verify WSL Installation**
+
+```powershell
+# Open a new PowerShell window and check:
+wsl --version
+
+# Should show WSL version info. If not, restart your computer.
+```
+
+**Step 3: Start WSL and Navigate to Project**
+
+```powershell
+# Open WSL Ubuntu terminal:
 wsl
 
-# Now you're in Linux! Navigate to your project:
+# You're now in Linux! Navigate to your project folder:
+# Windows drives are mounted under /mnt/
+# Example: D:\Learning\Kharapur_Hackathon\hackathon becomes:
 cd /mnt/d/Learning/Kharapur_Hackathon/hackathon
 
-# 4. Install Python and dependencies
-sudo apt update && sudo apt install python3 python3-pip python3-venv -y
+# Verify you're in the right folder:
+ls -la
+# Should see: main.py, config.yaml, requirements.txt, etc.
+```
 
-# 5. Create virtual environment
+**Step 4: Install Python and System Dependencies**
+
+```bash
+# Update package list and install Python:
+sudo apt update
+sudo apt install python3 python3-pip python3-venv -y
+
+# Verify Python installation:
+python3 --version
+# Should show: Python 3.x.x
+```
+
+**Step 5: Create Virtual Environment**
+
+```bash
+# Create virtual environment:
 python3 -m venv venv
+
+# Activate it:
 source venv/bin/activate
 
-# 6. Install requirements
+# Your prompt should now show (venv) prefix
+```
+
+**Step 6: Install Python Dependencies**
+
+```bash
+# Upgrade pip first:
 pip install --upgrade pip
+
+# Install all requirements (this may take 5-10 minutes):
 pip install -r requirements.txt
+
+# Verify key packages installed:
+pip list | grep -E 'pathway|groq|sentence-transformers'
 ```
 
 #### **For Linux/Mac Users**
 
+**Step 1: Navigate to Project**
+
 ```bash
-# Clone the repository
-git clone <your-repo>
-cd hackathon
+# If you cloned from git:
+cd path/to/hackathon
 
-# Create virtual environment
+# Or if you have the folder already:
+cd /path/to/Kharapur_Hackathon/hackathon
+
+# Verify you're in the right folder:
+ls -la
+# Should see: main.py, config.yaml, requirements.txt, etc.
+```
+
+**Step 2: Check Python Installation**
+
+```bash
+# Verify Python 3.8+ is installed:
+python3 --version
+
+# If not installed:
+# Ubuntu/Debian: sudo apt install python3 python3-pip python3-venv
+# macOS: brew install python3
+```
+
+**Step 3: Create Virtual Environment**
+
+```bash
+# Create virtual environment:
 python3 -m venv venv
-source venv/bin/activate  # Linux/Mac
 
-# Install dependencies
+# Activate it:
+source venv/bin/activate
+
+# Your prompt should now show (venv) prefix
+```
+
+**Step 4: Install Dependencies**
+
+```bash
+# Upgrade pip:
+pip install --upgrade pip
+
+# Install all requirements (5-10 minutes):
 pip install -r requirements.txt
+
+# Verify installation:
+pip list | grep -E 'pathway|groq|sentence-transformers'
 ```
 
 ### Setup API Keys
 
-1. **Get FREE Groq API Key**: https://console.groq.com
-2. Create `.env` file from template:
+**Step 1: Get FREE API Keys** (At least one required, multiple recommended)
 
-   ```bash
-   # WSL/Linux/Mac
-   cp .env.example .env
-   nano .env  # or use any text editor
+1. **HuggingFace** (default, recommended):
 
-   # Windows (if editing from Windows)
-   # Open .env in VS Code or Notepad
-   ```
+   - Go to: https://huggingface.co/settings/tokens
+   - Click "New token" → Name it (e.g., "hackathon") → Copy the token
+   - Starts with `hf_...`
 
-3. Add your API key:
-   ```
-   GROQ_API_KEY=your_actual_groq_key_here
-   ```
+2. **Groq** (fast, recommended):
+
+   - Go to: https://console.groq.com
+   - Sign up/login → Go to API Keys → Create new key
+   - Starts with `gsk_...`
+
+3. **DeepSeek** (optional):
+   - Go to: https://platform.deepseek.com
+   - Sign up → Get API key
+
+**Step 2: Create `.env` File**
+
+```bash
+# In your project folder (WSL/Linux/Mac):
+cp .env.example .env
+
+# Edit the file:
+nano .env
+# OR use your favorite editor:
+code .env  # VS Code
+vim .env   # Vim
+```
+
+**Step 3: Add Your API Keys**
+
+Open `.env` and replace the placeholder values:
+
+```bash
+# Required: At least one of these
+HUGGINGFACE_API_KEY=hf_your_actual_huggingface_token_here
+GROQ_API_KEY=gsk_your_actual_groq_key_here
+
+# Optional but recommended:
+DEEPSEEK_API_KEY=your_actual_deepseek_key_here
+
+# Only if using local Ollama:
+OLLAMA_MODEL=phi3:mini
+
+# Optional paid providers:
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+# GOOGLE_API_KEY=...
+```
+
+**Step 4: Verify API Keys Work**
+
+```bash
+# Test that keys are loaded:
+python3 -c "from dotenv import load_dotenv; import os; load_dotenv(); print('HF Key:', 'SET' if os.getenv('HUGGINGFACE_API_KEY') else 'NOT SET'); print('Groq Key:', 'SET' if os.getenv('GROQ_API_KEY') else 'NOT SET')"
+
+# Should show:
+# HF Key: SET
+# Groq Key: SET
+```
+
+**Important**: The system uses a smart fallback chain (HuggingFace → Groq → Ollama). Having multiple API keys ensures the system keeps running if one provider hits rate limits.
 
 ### Run the System
 
-#### Process Training Data (140 examples)
+**Important**: Make sure you're in the project directory with virtual environment activated:
 
 ```bash
+# Should see (venv) in your prompt
+# If not, run:
+source venv/bin/activate  # Linux/Mac/WSL
+```
+
+#### **Quick Test** (Single Example)
+
+Test the system on one example first:
+
+```bash
+# Run the quick check script:
+python scripts/quick_check.py
+
+# This processes the first row of train.csv
+# Expected output (after 10-30 seconds):
+# decision= 0 or 1
+# confidence= 0.XX
+# evidence_count= 20
+```
+
+If this works, your setup is complete! ✅
+
+#### **Process Training Dataset** (140 examples)
+
+```bash
+# Process all training data:
 python main.py --dataset train.csv --output train_results.csv
+
+# Expected behavior:
+# - Shows progress bar
+# - Takes 30-60 minutes depending on provider
+# - Creates train_results.csv with predictions
+# - Can resume if interrupted (skips already processed IDs)
+
+# Check the output:
+head -5 train_results.csv
+# Should show:
+# Story ID,Prediction,Rationale
+# 46,1,"No contradictions found..."
+# 137,0,"Backstory contradicts..."
 ```
 
-#### Generate Test Predictions (59 examples for submission)
+#### **Generate Test Predictions** (For Submission)
 
 ```bash
+# Process test dataset (59 examples):
 python main.py --dataset test.csv --output submission.csv
+
+# This is your final submission file!
+# Expected time: 15-30 minutes
+
+# Verify submission format:
+head -5 submission.csv
+wc -l submission.csv
+# Should show 60 lines (1 header + 59 predictions)
 ```
 
-#### Use Different LLM Provider
+#### **Resume Interrupted Run**
+
+If the process stops (rate limit, crash, etc.), just rerun the same command:
 
 ```bash
-# Use Ollama (local, requires Ollama installed)
-python main.py --provider ollama --dataset train.csv
+# It automatically skips already processed examples:
+python main.py --dataset test.csv --output submission.csv
 
-# Use Claude (requires API key)
-python main.py --provider anthropic --dataset test.csv
+# You'll see: "Skipping already processed ID: 95"
+```
 
-# Use GPT-4 (requires API key)
-python main.py --provider openai --dataset test.csv
+#### **Use Different LLM Provider**
+
+```bash
+# Use Groq (fast, free, requires API key):
+python main.py --provider groq --dataset train.csv --output groq_results.csv
+
+# Use Ollama (local, requires Ollama installed and running):
+python main.py --provider ollama --dataset train.csv --output ollama_results.csv
+
+# Use Claude (requires API key and credits):
+python main.py --provider anthropic --dataset test.csv --output claude_submission.csv
+
+# Use GPT-4 (requires API key and credits):
+python main.py --provider openai --dataset test.csv --output gpt4_submission.csv
+
+# Use Google Gemini (requires API key):
+python main.py --provider google --dataset test.csv --output gemini_submission.csv
+```
+
+**Notes**:
+
+- The `--provider` flag works for: groq, ollama, anthropic, openai, google
+- For HuggingFace or DeepSeek, edit `llm_provider` in `config.yaml`
+- Default provider (HuggingFace) is used if no `--provider` flag given
+
+#### **Single Narrative Mode** (Custom Input)
+
+Test on your own narrative and backstory:
+
+```bash
+python main.py \
+  --narrative data/The\ Count\ of\ Monte\ Cristo.txt \
+  --backstory my_backstory.txt \
+  --output single_result.csv
+
+# Creates a CSV with one prediction
 ```
 
 ## 📊 Configuration
@@ -175,49 +397,62 @@ Edit `config.yaml` to customize:
 
 ```yaml
 # Primary LLM provider
-llm_provider: "groq" # groq, ollama, anthropic, openai, google
+llm_provider: "huggingface" # huggingface, deepseek, groq, ollama, anthropic, openai, google
 
-# Groq Configuration (FREE)
+# HuggingFace Configuration (FREE - default)
 providers:
-  groq:
-    model: "llama-3.3-70b-versatile" # Latest model
+  huggingface:
+    model: "meta-llama/Meta-Llama-3-8B-Instruct"
     temperature: 0.1
-    max_tokens: 4096
+    max_tokens: 300
+
+  groq:
+    model: "llama-3.1-8b-instant" # Fast and efficient
+    temperature: 0.1
+    max_tokens: 300
+
+  ollama:
+    model: "phi3:mini" # Only needs ~2GB RAM
+    temperature: 0.1
+    num_ctx: 2048
+    max_tokens: 300
 
 # Self-consistency
 self_consistency:
   enabled: true
-  num_chains: 10 # Number of reasoning chains
+  num_chains: 2 # Number of reasoning chains (can increase for higher accuracy)
   voting_strategy: "weighted" # or "majority"
+  early_stop_confidence: 0.85 # Stop early when confident
 
-# Multi-agent system
+# Multi-agent system (optional - disabled by default for speed)
 multi_agent:
-  enabled: true
-  deliberation_rounds: 3
+  enabled: false
+  deliberation_rounds: 1
 
-# Ensemble
+# Ensemble (optional - disabled by default for speed)
 ensemble:
-  enabled: true
+  enabled: false
   models:
     - provider: "groq"
-      model: "llama-3.3-70b-versatile"
+      model: "llama-3.1-8b-instant"
       weight: 1.0
-    - provider: "ollama"
-      model: "llama3.1:8b"
-      weight: 0.8
 ```
 
 ## 💰 Cost Analysis
 
-| Configuration             | Accuracy | Cost          | Speed   |
-| ------------------------- | -------- | ------------- | ------- |
-| **Groq Llama 3.3 70B**    | ~82%     | **$0** (FREE) | ⚡ Fast |
-| + Self-consistency (10x)  | ~87%     | **$0**        | Medium  |
-| + Multi-agent             | ~90%     | **$0**        | Slower  |
-| **+ Claude 3.5 Sonnet**   | ~93%     | ~$20-50       | Fast    |
-| **+ Ensemble (3 models)** | ~95%     | ~$30-70       | Slower  |
+| Configuration                        | Accuracy | Cost          | Speed  |
+| ------------------------------------ | -------- | ------------- | ------ |
+| **HuggingFace Llama 3 8B (default)** | ~60%     | **$0** (FREE) | Fast   |
+| **+ Fallback (Groq/Ollama)**         | ~65%     | **$0** (FREE) | Fast   |
+| **+ Self-consistency (2 chains)**    | ~70%     | **$0** (FREE) | Medium |
+| **+ More chains (5-10)**             | ~75-80%  | **$0** (FREE) | Slower |
+| **+ Multi-agent**                    | ~80-85%  | **$0** (FREE) | Slower |
+| **+ Claude 3.5 Sonnet**              | ~90%+    | ~$20-50       | Fast   |
+| **+ Ensemble (3 models)**            | ~92%+    | ~$30-70       | Slower |
 
-_All processing is FREE when using Groq - no credit card required!_
+_All processing is FREE when using HuggingFace/Groq/DeepSeek/Ollama - no credit card required!_
+
+**Note**: Accuracy estimates are approximate and depend on dataset characteristics, prompt tuning, and model availability.
 
 ## 🔧 Advanced Usage
 
@@ -252,10 +487,68 @@ python main.py --log-level DEBUG --dataset train.csv
 ### Process Specific Provider
 
 ```bash
-# Override config file provider
+# Override config file provider (supported: groq, ollama, anthropic, openai, google)
 python main.py --provider groq --dataset train.csv
 python main.py --provider anthropic --dataset test.csv
+
+# Note: To use HuggingFace or DeepSeek, edit config.yaml and set llm_provider
 ```
+
+### **Common Issues During Installation/Running**
+
+#### "Command 'python' not found"
+
+```bash
+# Use python3 instead of python:
+python3 main.py --dataset train.csv
+
+# Or create an alias:
+alias python=python3
+```
+
+#### "ModuleNotFoundError: No module named 'pathway'"
+
+```bash
+# Make sure virtual environment is activated:
+source venv/bin/activate
+
+# Reinstall requirements:
+pip install -r requirements.txt
+```
+
+#### "No .env file found" or "API key not found"
+
+```bash
+# Create .env from template:
+cp .env.example .env
+
+# Edit it and add your keys:
+nano .env
+
+# Verify it exists:
+cat .env
+```
+
+#### Logs show "Rate limit exceeded"
+
+- This is normal! The fallback system will automatically switch providers
+- Make sure you have multiple API keys set up
+- Or wait a few minutes and the rate limit will reset
+
+#### "Can't find train.csv or test.csv"
+
+```bash
+# Make sure you're in the project root directory:
+pwd
+# Should show: .../hackathon
+
+ls -la
+# Should see: train.csv, test.csv, main.py, config.yaml
+
+# If missing, download from hackathon materials
+```
+
+---
 
 ## 📁 Project Structure
 
@@ -348,7 +641,7 @@ For each row, it loads the corresponding full novel from `data/` folder.
 
 ### 3. **Self-Consistency Reasoning**
 
-Generates 10 independent reasoning chains with different strategies:
+Generates multiple independent reasoning chains (default: 2, configurable up to 10+) with different strategies:
 
 - **Direct Analysis**: Straightforward consistency check
 - **Timeline Reconstruction**: Temporal ordering validation
@@ -360,7 +653,7 @@ Generates 10 independent reasoning chains with different strategies:
 - **Step-by-Step Logic**: Formal logical analysis
 - **Counterfactual Reasoning**: "What if" scenarios
 
-Each chain votes independently, then results are aggregated.
+Each chain votes independently with early stopping when confidence threshold (0.85) is reached. Results are aggregated using weighted or majority voting.
 
 ### 4. **Multi-Agent Adversarial System**
 
@@ -435,33 +728,40 @@ cd /mnt/d/Learning/Kharapur_Hackathon/hackathon
 python main.py --dataset train.csv --output results.csv
 ```
 
-### "Groq API key not found"
+### "API key not found" errors
 
 ```bash
-# Make sure .env file exists with your actual key:
+# Make sure .env file exists with your actual keys:
+HUGGINGFACE_API_KEY=hf_your_actual_key_here
 GROQ_API_KEY=gsk_your_actual_key_here
+DEEPSEEK_API_KEY=your_deepseek_key_here
 
 # Check if file exists
 cat .env  # Linux/WSL
 type .env  # Windows CMD
 ```
 
-### "Model llama-3.1-70b-versatile decommissioned"
+### "Rate limit" or "402 Payment Required" errors
 
-Update `config.yaml`:
+The system automatically falls back through providers:
 
-```yaml
-providers:
-  groq:
-    model: "llama-3.3-70b-versatile" # Use newer model
+- **HuggingFace → Groq → Ollama**
+
+Make sure you have multiple API keys set up, or install Ollama as a final fallback:
+
+```bash
+# Install Ollama: https://ollama.ai
+ollama pull phi3:mini
 ```
 
 ### "Ollama connection failed"
 
 ```bash
 # Install Ollama first: https://ollama.ai
-ollama serve  # Start server
-ollama pull llama3.1:70b  # Download model
+ollama serve  # Start server (run in background)
+ollama pull phi3:mini  # Download model (~2GB)
+# or
+ollama pull llama3.1:8b  # Larger model (~4.7GB)
 ```
 
 ### "Out of memory" errors
@@ -474,7 +774,7 @@ pathway:
 
 # Or reduce reasoning chains:
 self_consistency:
-  num_chains: 5 # Fewer chains
+  num_chains: 1 # Single chain (fastest)
 ```
 
 ### WSL: "Permission denied" errors
@@ -512,17 +812,19 @@ Story ID,Prediction,Rationale
 
 ### For Maximum Accuracy:
 
-1. Enable all features (self-consistency + multi-agent)
-2. Use Groq Llama 3.1 70B (best free model)
-3. If budget allows, add Claude 3.5 to ensemble
-4. Increase `num_chains` to 15-20
+1. Enable all features (self-consistency + multi-agent + ensemble)
+2. Set multiple API keys for fallback reliability
+3. Increase `num_chains` to 10-20 in config.yaml
+4. Enable multi-agent: set `multi_agent.enabled: true`
+5. If budget allows, add Claude 3.5 to ensemble or use as primary
 
 ### For Maximum Speed:
 
-1. Disable multi-agent: `--no-multi-agent`
-2. Reduce chains: set `num_chains: 3`
-3. Use smaller model: `llama3.1:8b` with Ollama
+1. Disable multi-agent: `--no-multi-agent` (already disabled by default)
+2. Reduce chains: set `num_chains: 1`
+3. Use fast model: keep default `llama-3.1-8b-instant` or `phi3:mini`
 4. Disable reranker: `--no-reranker`
+5. Set `early_stop_confidence: 0.75` for faster decisions
 
 ## 📄 License
 
